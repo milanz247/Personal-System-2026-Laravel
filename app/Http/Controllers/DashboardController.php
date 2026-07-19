@@ -1,0 +1,73 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Account;
+use App\Models\Transaction;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class DashboardController extends Controller
+{
+    /**
+     * Display the financial dashboard overview.
+     */
+    public function index(Request $request): Response
+    {
+        // Fetch user's accounts (scoped automatically by user_isolation global scope)
+        $accounts = Account::all();
+
+        // 1. Liquid Cash:
+        // Sum of balances of 'bank_account' type PLUS default 'Cash Wallet'.
+        $liquidCash = (float) $accounts->filter(function ($account) {
+            return $account->type === 'bank_account' || 
+                ($account->type === 'cash_wallet' && $account->name === 'Cash Wallet');
+        })->sum('balance');
+
+        // 2. Cash in Hand:
+        // Balance of the default 'Cash Wallet'.
+        $cashInHand = (float) $accounts->filter(function ($account) {
+            return $account->type === 'cash_wallet' && $account->name === 'Cash Wallet';
+        })->sum('balance');
+
+        // 3. Virtual Pockets:
+        // Sum of balances of budgeting wallets (type 'cash_wallet' and name NOT 'Cash Wallet').
+        $virtualPockets = (float) $accounts->filter(function ($account) {
+            return $account->type === 'cash_wallet' && $account->name !== 'Cash Wallet';
+        })->sum('balance');
+
+        // 4. Total Debt:
+        // Sum of all credit card balances (returned as positive number).
+        $totalDebt = (float) abs($accounts->where('type', 'credit_card')->sum('balance'));
+
+        // 5. Total Assets:
+        // Calculated as (liquidCash + virtualPockets + any investments).
+        $investments = (float) $accounts->where('type', 'investment')->sum('balance');
+        $totalAssets = $liquidCash + $virtualPockets + $investments;
+
+        // 6. Net Worth:
+        // Calculated as (totalAssets - totalDebt).
+        $netWorth = $totalAssets - $totalDebt;
+
+        // Recent transaction history (limit 5)
+        $recentTransactions = Transaction::with('account')
+            ->orderBy('date', 'desc')
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->get();
+
+        return Inertia::render('Dashboard', [
+            'metrics' => [
+                'liquidCash' => $liquidCash,
+                'cashInHand' => $cashInHand,
+                'virtualPockets' => $virtualPockets,
+                'totalDebt' => $totalDebt,
+                'totalAssets' => $totalAssets,
+                'netWorth' => $netWorth,
+            ],
+            'accounts' => $accounts,
+            'recentTransactions' => $recentTransactions,
+        ]);
+    }
+}
