@@ -110,6 +110,100 @@ class DashboardController extends Controller
             ->whereBetween('date', [$startOfMonth, $endOfMonth])
             ->sum('fee');
 
+        // === DEBT TREND (credit card balance at the end of each of the last 6 months) ===
+        // There's no balance-snapshot history, so the trend is reconstructed by walking
+        // the current balance backwards, undoing each month's net credit-card movement.
+        $creditCardAccountIds = $primaryAccounts->where('type', 'credit_card')->pluck('id');
+        $runningCreditBalance = (float) $primaryAccounts->where('type', 'credit_card')->sum('balance');
+
+        $debtTrend = [];
+        $monthCursor = Carbon::now()->copy();
+
+        for ($i = 0; $i < 6; $i++) {
+            $debtTrend[] = round(abs($runningCreditBalance), 2);
+
+            $netChange = (float) Transaction::query()
+                ->whereIn('account_id', $creditCardAccountIds)
+                ->whereBetween('date', [$monthCursor->copy()->startOfMonth(), $monthCursor->copy()->endOfMonth()])
+                ->selectRaw("SUM(CASE WHEN type = 'expense' THEN amount WHEN type = 'income' THEN -amount ELSE 0 END) as net")
+                ->value('net') ?? 0;
+
+            $runningCreditBalance -= $netChange;
+            $monthCursor->subMonth();
+        }
+        $debtTrend = array_reverse($debtTrend);
+
+        // === MONTHLY INCOME/EXPENSE TREND BY CATEGORY (last 6 months) ===
+        $monthsBack = 6;
+        $trendStart = Carbon::now()->subMonths($monthsBack - 1)->startOfMonth();
+
+        $trendTransactions = Transaction::query()
+            ->whereIn('account_id', $primaryAccountIds)
+            ->whereIn('type', ['income', 'expense'])
+            ->where('date', '>=', $trendStart)
+            ->whereNotNull('category')
+            ->get(['type', 'category', 'amount', 'date']);
+
+        // Only the top categories get their own color/segment; the rest collapse into "Other" to keep the chart legible.
+        $topExpenseCategories = $trendTransactions->where('type', 'expense')
+            ->groupBy('category')
+            ->map(fn ($rows) => $rows->sum('amount'))
+            ->sortDesc()
+            ->keys()
+            ->take(5)
+            ->all();
+
+        $topIncomeCategories = $trendTransactions->where('type', 'income')
+            ->groupBy('category')
+            ->map(fn ($rows) => $rows->sum('amount'))
+            ->sortDesc()
+            ->keys()
+            ->take(5)
+            ->all();
+
+        $monthlyTrend = [];
+        for ($i = $monthsBack - 1; $i >= 0; $i--) {
+            $monthDate = Carbon::now()->subMonths($i);
+            $monthStart = $monthDate->copy()->startOfMonth();
+            $monthEnd = $monthDate->copy()->endOfMonth();
+
+            $monthTx = $trendTransactions->filter(
+                fn ($tx) => Carbon::parse($tx->date)->between($monthStart, $monthEnd)
+            );
+
+            $incomeByCategory = [];
+            foreach ($topIncomeCategories as $cat) {
+                $amount = (float) $monthTx->where('type', 'income')->where('category', $cat)->sum('amount');
+                if ($amount > 0) {
+                    $incomeByCategory[$cat] = $amount;
+                }
+            }
+            $otherIncome = (float) $monthTx->where('type', 'income')->whereNotIn('category', $topIncomeCategories)->sum('amount');
+            if ($otherIncome > 0) {
+                $incomeByCategory['Other'] = $otherIncome;
+            }
+
+            $expenseByCategory = [];
+            foreach ($topExpenseCategories as $cat) {
+                $amount = (float) $monthTx->where('type', 'expense')->where('category', $cat)->sum('amount');
+                if ($amount > 0) {
+                    $expenseByCategory[$cat] = $amount;
+                }
+            }
+            $otherExpense = (float) $monthTx->where('type', 'expense')->whereNotIn('category', $topExpenseCategories)->sum('amount');
+            if ($otherExpense > 0) {
+                $expenseByCategory['Other'] = $otherExpense;
+            }
+
+            $monthlyTrend[] = [
+                'month' => $monthDate->format('M'),
+                'income' => round(array_sum($incomeByCategory), 2),
+                'expense' => round(array_sum($expenseByCategory), 2),
+                'incomeByCategory' => $incomeByCategory,
+                'expenseByCategory' => $expenseByCategory,
+            ];
+        }
+
         return Inertia::render('Dashboard', [
             'metrics' => [
                 'liquidCash' => $liquidCash,
@@ -127,6 +221,8 @@ class DashboardController extends Controller
             'accounts' => $accounts,
             'recentTransactions' => $recentTransactions,
             'categoryBreakdown' => $categoryBreakdown,
+            'debtTrend' => $debtTrend,
+            'monthlyTrend' => $monthlyTrend,
         ]);
     }
 }

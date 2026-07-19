@@ -70,6 +70,11 @@ test('authenticated users can visit the dashboard and see metrics', function () 
         ->where('metrics.cashInHand', 5000.0)
         ->where('metrics.totalAssets', 150000.0)
         ->has('accounts', 5)
+        ->has('debtTrend', 6)
+        ->where('debtTrend.5', 25000.0)
+        ->has('monthlyTrend', 6)
+        ->where('monthlyTrend.5.income', 0.0)
+        ->where('monthlyTrend.5.expense', 0.0)
     );
 });
 
