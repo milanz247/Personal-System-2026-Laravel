@@ -7,9 +7,29 @@ use App\Models\Transaction;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class TransactionController extends Controller
 {
+    /**
+     * Display a listing of the transactions.
+     */
+    public function index(): Response
+    {
+        $transactions = Transaction::with(['account', 'toAccount'])
+            ->orderBy('date', 'desc')
+            ->orderBy('id', 'desc')
+            ->get();
+
+        $accounts = Account::orderBy('name', 'asc')->get();
+
+        return Inertia::render('transactions/Index', [
+            'transactions' => $transactions,
+            'accounts' => $accounts,
+        ]);
+    }
+
     /**
      * Store a newly created transaction in storage.
      */

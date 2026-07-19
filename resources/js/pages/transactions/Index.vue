@@ -1,0 +1,548 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue';
+import { Head, useForm } from '@inertiajs/vue3';
+import { index as transactionsIndex } from '@/routes/transactions';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+    SheetFooter,
+} from '@/components/ui/sheet';
+import { 
+    Plus,
+    Calendar,
+    ArrowRightLeft,
+    TrendingUp,
+    TrendingDown,
+    Search
+} from '@lucide/vue';
+
+defineOptions({
+    layout: {
+        breadcrumbs: [
+            {
+                title: 'Transactions',
+                href: transactionsIndex().url,
+            },
+        ],
+    },
+});
+
+const props = defineProps<{
+    transactions: Array<{
+        id: number;
+        user_id: number;
+        type: 'income' | 'expense' | 'transfer';
+        amount: string;
+        date: string;
+        account_id: number | null;
+        to_account_id: number | null;
+        category: string | null;
+        description: string | null;
+        account: {
+            id: number;
+            name: string;
+        } | null;
+        to_account: {
+            id: number;
+            name: string;
+        } | null;
+    }>;
+    accounts: Array<{
+        id: number;
+        name: string;
+        type: 'cash_wallet' | 'bank_account' | 'credit_card' | 'investment';
+        balance: string;
+        credit_limit: string | null;
+        currency: string;
+    }>;
+}>();
+
+// Form & Modal States
+const isAddDialogOpen = ref(false);
+const todayStr = new Date().toISOString().split('T')[0];
+
+const form = useForm({
+    type: 'expense' as 'income' | 'expense' | 'transfer',
+    amount: '',
+    date: todayStr,
+    account_id: '',
+    to_account_id: '',
+    category: '',
+    description: '',
+});
+
+// Interactive Search and Filtering
+const searchQuery = ref('');
+const filterType = ref<'all' | 'income' | 'expense' | 'transfer'>('all');
+
+const filteredTransactions = computed(() => {
+    return props.transactions.filter(tx => {
+        // Type filter
+        if (filterType.value !== 'all' && tx.type !== filterType.value) {
+            return false;
+        }
+        
+        // Search query
+        if (searchQuery.value) {
+            const query = searchQuery.value.toLowerCase();
+            const desc = (tx.description || '').toLowerCase();
+            const cat = (tx.category || '').toLowerCase();
+            const accName = (tx.account?.name || '').toLowerCase();
+            const toAccName = (tx.to_account?.name || '').toLowerCase();
+            
+            return desc.includes(query) || 
+                   cat.includes(query) || 
+                   accName.includes(query) || 
+                   toAccName.includes(query);
+        }
+        
+        return true;
+    });
+});
+
+// Financial Stats Summary (based on all loaded transactions)
+const totalInflow = computed(() => {
+    return props.transactions
+        .filter(t => t.type === 'income')
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+});
+
+const totalOutflow = computed(() => {
+    return props.transactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+});
+
+const netFlow = computed(() => {
+    return totalInflow.value - totalOutflow.value;
+});
+
+// Formatting Utilities
+const formatCurrency = (val: number, currency: string = 'LKR') => {
+    return new Intl.NumberFormat('en-LK', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(val);
+};
+
+const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+};
+
+const getCategoryStyle = (category: string | null) => {
+    if (!category) return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300';
+    
+    const categoriesMap: Record<string, string> = {
+        'Salary': 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30',
+        'Freelance': 'bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-400 border border-teal-200/50 dark:border-teal-900/30',
+        'Investments': 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/30',
+        'Food': 'bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-200/50 dark:border-orange-900/30',
+        'Transport': 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-200/50 dark:border-blue-900/30',
+        'Utilities': 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-900/30',
+        'Entertainment': 'bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-200/50 dark:border-purple-900/30',
+        'Shopping': 'bg-pink-50 text-pink-700 dark:bg-pink-500/10 dark:text-pink-400 border border-pink-200/50 dark:border-pink-900/30',
+        'Medical/Health': 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30',
+        'Bills/Debt': 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 border border-red-200/50 dark:border-red-900/30',
+    };
+    
+    return categoriesMap[category] || 'bg-zinc-50 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50';
+};
+
+const submitTransaction = () => {
+    form.post('/transactions', {
+        onSuccess: () => {
+            isAddDialogOpen.value = false;
+            form.reset({
+                type: form.type,
+                amount: '',
+                date: todayStr,
+                account_id: '',
+                to_account_id: '',
+                category: '',
+                description: '',
+            });
+        },
+    });
+};
+</script>
+
+<template>
+    <Head title="Transactions Ledger" />
+
+    <div class="flex flex-1 flex-col gap-6 p-6">
+        <!-- Header -->
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight text-foreground">Transactions</h1>
+                <p class="text-sm text-muted-foreground">Manage and track your income, expenses, and transfers.</p>
+            </div>
+            <Button @click="isAddDialogOpen = true" class="self-start sm:self-center">
+                <Plus class="size-4 mr-2" />
+                Add Transaction
+            </Button>
+        </div>
+
+        <!-- Premium Mini-Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card class="bg-card/50 backdrop-blur-sm transition-all duration-300 border-border/60 hover:shadow-sm">
+                <CardContent class="p-4 flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Total Inflow</span>
+                        <div class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-500 font-mono tabular-nums">
+                            + {{ formatCurrency(totalInflow) }}
+                        </div>
+                    </div>
+                    <div class="p-2.5 bg-emerald-500/10 text-emerald-500 rounded-lg">
+                        <TrendingUp class="size-4" />
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card class="bg-card/50 backdrop-blur-sm transition-all duration-300 border-border/60 hover:shadow-sm">
+                <CardContent class="p-4 flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Total Outflow</span>
+                        <div class="text-xl font-bold tracking-tight text-red-600 dark:text-red-400 font-mono tabular-nums">
+                            - {{ formatCurrency(totalOutflow) }}
+                        </div>
+                    </div>
+                    <div class="p-2.5 bg-red-500/10 text-red-500 rounded-lg">
+                        <TrendingDown class="size-4" />
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card class="bg-card/50 backdrop-blur-sm transition-all duration-300 border-border/60 hover:shadow-sm">
+                <CardContent class="p-4 flex items-center justify-between">
+                    <div class="space-y-1">
+                        <span class="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Net Period Flow</span>
+                        <div class="text-xl font-bold tracking-tight font-mono tabular-nums" :class="netFlow >= 0 ? 'text-primary' : 'text-destructive'">
+                            {{ netFlow >= 0 ? '+' : '' }}{{ formatCurrency(netFlow) }}
+                        </div>
+                    </div>
+                    <div class="p-2.5 bg-blue-500/10 text-blue-500 rounded-lg">
+                        <ArrowRightLeft class="size-4" />
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
+
+        <!-- Table and Filtering Card -->
+        <Card class="bg-card border-border/60 overflow-hidden shadow-sm">
+            <CardHeader class="p-4 border-b border-border/60 space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <!-- Search Input -->
+                    <div class="relative max-w-sm w-full">
+                        <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                        <Input 
+                            v-model="searchQuery" 
+                            type="text" 
+                            placeholder="Search description or category..." 
+                            class="pl-9 text-sm"
+                        />
+                    </div>
+
+                    <!-- Type Filter Tabs -->
+                    <div class="flex items-center gap-1.5 p-0.5 rounded-lg bg-muted border text-sm font-medium">
+                        <button 
+                            type="button" 
+                            @click="filterType = 'all'"
+                            class="px-3 py-1.5 rounded-md transition-all"
+                            :class="filterType === 'all' ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            All
+                        </button>
+                        <button 
+                            type="button" 
+                            @click="filterType = 'expense'"
+                            class="px-3 py-1.5 rounded-md transition-all"
+                            :class="filterType === 'expense' ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Expenses
+                        </button>
+                        <button 
+                            type="button" 
+                            @click="filterType = 'income'"
+                            class="px-3 py-1.5 rounded-md transition-all"
+                            :class="filterType === 'income' ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Incomes
+                        </button>
+                        <button 
+                            type="button" 
+                            @click="filterType = 'transfer'"
+                            class="px-3 py-1.5 rounded-md transition-all"
+                            :class="filterType === 'transfer' ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Transfers
+                        </button>
+                    </div>
+                </div>
+            </CardHeader>
+
+            <!-- Table -->
+            <div class="relative w-full overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-muted/30 border-b border-border/60">
+                        <tr>
+                            <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Date</th>
+                            <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Description</th>
+                            <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Category</th>
+                            <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Account</th>
+                            <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Type</th>
+                            <th class="px-4 py-3.5 text-right align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border/40">
+                        <tr v-if="filteredTransactions.length === 0">
+                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground font-medium">
+                                No matching transactions found.
+                            </td>
+                        </tr>
+                        <tr 
+                            v-for="tx in filteredTransactions" 
+                            :key="tx.id" 
+                            class="transition-colors hover:bg-muted/10"
+                        >
+                            <td class="px-4 py-3.5 align-middle text-muted-foreground whitespace-nowrap font-medium">
+                                {{ formatDate(tx.date) }}
+                            </td>
+                            <td class="px-4 py-3.5 align-middle font-medium text-foreground max-w-[200px] truncate">
+                                {{ tx.description || '-' }}
+                            </td>
+                            <td class="px-4 py-3.5 align-middle whitespace-nowrap">
+                                <span :class="['px-2.5 py-1 rounded text-xs font-bold tracking-wide border', getCategoryStyle(tx.category)]">
+                                    {{ tx.category || 'Transfer' }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 align-middle whitespace-nowrap">
+                                <div v-if="tx.type === 'transfer'" class="flex items-center gap-2 text-muted-foreground font-medium">
+                                    <span>{{ tx.account?.name }}</span>
+                                    <span class="text-muted-foreground/30">➔</span>
+                                    <span class="text-foreground font-medium">{{ tx.to_account?.name }}</span>
+                                </div>
+                                <span v-else class="text-foreground font-medium">
+                                    {{ tx.account?.name || '-' }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 align-middle whitespace-nowrap">
+                                <span 
+                                    class="inline-flex items-center gap-1.5 text-xs font-bold capitalize"
+                                    :class="tx.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : (tx.type === 'expense' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400')"
+                                >
+                                    <span class="size-2 rounded-full" :class="tx.type === 'income' ? 'bg-emerald-500' : (tx.type === 'expense' ? 'bg-red-500' : 'bg-blue-500')"></span>
+                                    {{ tx.type }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 align-middle text-right font-mono font-semibold tracking-tight text-sm tabular-nums whitespace-nowrap">
+                                <span v-if="tx.type === 'income'" class="text-emerald-600 dark:text-emerald-500">
+                                    + {{ formatCurrency(parseFloat(tx.amount)) }}
+                                </span>
+                                <span v-else-if="tx.type === 'expense'" class="text-foreground">
+                                    - {{ formatCurrency(parseFloat(tx.amount)) }}
+                                </span>
+                                <span v-else class="text-muted-foreground">
+                                    {{ formatCurrency(parseFloat(tx.amount)) }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </Card>
+
+        <!-- Right Side Slide-over Panel (Sheet) -->
+        <Sheet v-model:open="isAddDialogOpen">
+            <SheetContent side="right" class="w-full sm:max-w-[450px] overflow-y-auto space-y-6">
+                <SheetHeader>
+                    <SheetTitle>New Transaction</SheetTitle>
+                    <SheetDescription>
+                        Record a new financial movement.
+                    </SheetDescription>
+                </SheetHeader>
+
+                <form @submit.prevent="submitTransaction" class="space-y-5">
+                    <!-- Error messages from server validation (e.g. credit card limit) -->
+                    <div v-if="form.errors.balance" class="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 rounded-lg text-xs font-semibold">
+                        {{ form.errors.balance }}
+                    </div>
+
+                    <!-- Type Tabs Toggle -->
+                    <div class="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1 text-center text-sm font-semibold">
+                        <button 
+                            type="button"
+                            @click="form.type = 'expense'; form.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="form.type === 'expense' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Expense
+                        </button>
+                        <button 
+                            type="button"
+                            @click="form.type = 'income'; form.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="form.type === 'income' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Income
+                        </button>
+                        <button 
+                            type="button"
+                            @click="form.type = 'transfer'; form.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="form.type === 'transfer' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Transfer
+                        </button>
+                    </div>
+
+                    <!-- Amount Field -->
+                    <div class="grid gap-2">
+                        <Label for="sheet_amount">Amount (LKR)</Label>
+                        <div class="relative flex items-center">
+                            <span class="absolute left-3 text-sm text-muted-foreground font-semibold">LKR</span>
+                            <Input 
+                                id="sheet_amount" 
+                                type="number" 
+                                step="0.01" 
+                                v-model="form.amount" 
+                                placeholder="0.00"
+                                class="pl-12 text-sm"
+                                required 
+                            />
+                        </div>
+                        <div v-if="form.errors.amount" class="text-xs text-red-500">{{ form.errors.amount }}</div>
+                    </div>
+
+                    <!-- Conditional Account Dropdowns -->
+                    <div v-if="form.type !== 'transfer'" class="grid gap-2">
+                        <Label for="sheet_account_id">Select Account</Label>
+                        <select 
+                            id="sheet_account_id"
+                            v-model="form.account_id" 
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                            required
+                        >
+                            <option value="">Select Account</option>
+                            <option v-for="acc in accounts" :key="acc.id" :value="acc.id">
+                                {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                            </option>
+                        </select>
+                        <div v-if="form.errors.account_id" class="text-xs text-red-500">{{ form.errors.account_id }}</div>
+                    </div>
+
+                    <div v-else class="grid grid-cols-2 gap-4">
+                        <div class="grid gap-2">
+                            <Label for="sheet_from_account_id">From Account</Label>
+                            <select 
+                                id="sheet_from_account_id"
+                                v-model="form.account_id" 
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                required
+                            >
+                                <option value="">Select From</option>
+                                <option v-for="acc in accounts" :key="acc.id" :value="acc.id">
+                                    {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                                </option>
+                            </select>
+                            <div v-if="form.errors.account_id" class="text-xs text-red-500">{{ form.errors.account_id }}</div>
+                        </div>
+                        
+                        <div class="grid gap-2">
+                            <Label for="sheet_to_account_id">To Account</Label>
+                            <select 
+                                id="sheet_to_account_id"
+                                v-model="form.to_account_id" 
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                required
+                            >
+                                <option value="">Select To</option>
+                                <option v-for="acc in accounts" :key="acc.id" :value="acc.id" :disabled="acc.id === form.account_id">
+                                    {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                                </option>
+                            </select>
+                            <div v-if="form.errors.to_account_id" class="text-xs text-red-500">{{ form.errors.to_account_id }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Category (Income/Expense only) -->
+                    <div v-if="form.type !== 'transfer'" class="grid gap-2">
+                        <Label for="sheet_category">Category</Label>
+                        <select 
+                            id="sheet_category"
+                            v-model="form.category" 
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                            required
+                        >
+                            <option value="">Select Category</option>
+                            <option v-if="form.type === 'income'" value="Salary">Salary</option>
+                            <option v-if="form.type === 'income'" value="Freelance">Freelance</option>
+                            <option v-if="form.type === 'income'" value="Investments">Investments</option>
+                            <option v-if="form.type === 'income'" value="Gifts/Other">Gifts/Other</option>
+                            
+                            <option v-if="form.type === 'expense'" value="Food">Food</option>
+                            <option v-if="form.type === 'expense'" value="Transport">Transport</option>
+                            <option v-if="form.type === 'expense'" value="Utilities">Utilities</option>
+                            <option v-if="form.type === 'expense'" value="Entertainment">Entertainment</option>
+                            <option v-if="form.type === 'expense'" value="Shopping">Shopping</option>
+                            <option v-if="form.type === 'expense'" value="Medical/Health">Medical/Health</option>
+                            <option v-if="form.type === 'expense'" value="Bills/Debt">Bills/Debt</option>
+                        </select>
+                        <div v-if="form.errors.category" class="text-xs text-red-500">{{ form.errors.category }}</div>
+                    </div>
+
+                    <!-- Date -->
+                    <div class="grid gap-2">
+                        <Label for="sheet_date">Date</Label>
+                        <Input 
+                            id="sheet_date" 
+                            type="date" 
+                            v-model="form.date" 
+                            class="text-sm"
+                            required 
+                        />
+                        <div v-if="form.errors.date" class="text-xs text-red-500">{{ form.errors.date }}</div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="grid gap-2">
+                        <Label for="sheet_description">Description (Optional)</Label>
+                        <textarea 
+                            id="sheet_description" 
+                            v-model="form.description" 
+                            class="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            placeholder="Describe this transaction..."
+                        ></textarea>
+                        <div v-if="form.errors.description" class="text-xs text-red-500">{{ form.errors.description }}</div>
+                    </div>
+
+                    <SheetFooter class="pt-4 flex flex-row gap-2 justify-end">
+                        <Button 
+                            type="button" 
+                            variant="outline" 
+                            @click="isAddDialogOpen = false"
+                            :disabled="form.processing"
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" :disabled="form.processing">
+                            {{ form.processing ? 'Saving...' : 'Save Transaction' }}
+                        </Button>
+                    </SheetFooter>
+                </form>
+            </SheetContent>
+        </Sheet>
+    </div>
+</template>

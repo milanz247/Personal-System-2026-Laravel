@@ -132,7 +132,7 @@ const submitTransaction = () => {
                         <CardTitle class="text-sm font-semibold tracking-tight text-foreground">
                             Net Worth
                         </CardTitle>
-                        <p class="text-[10px] text-muted-foreground font-medium">
+                        <p class="text-xs text-muted-foreground font-medium">
                             Total Assets - Total Liabilities
                         </p>
                     </div>
@@ -154,7 +154,7 @@ const submitTransaction = () => {
                         <CardTitle class="text-sm font-semibold tracking-tight text-foreground">
                             Liquid Cash
                         </CardTitle>
-                        <p class="text-[10px] text-muted-foreground font-medium">
+                        <p class="text-xs text-muted-foreground font-medium">
                             Bank Accounts + Cash Wallet
                         </p>
                     </div>
@@ -176,7 +176,7 @@ const submitTransaction = () => {
                         <CardTitle class="text-sm font-semibold tracking-tight text-foreground">
                             Cash in Hand
                         </CardTitle>
-                        <p class="text-[10px] text-muted-foreground font-medium">
+                        <p class="text-xs text-muted-foreground font-medium">
                             Cash Wallet
                         </p>
                     </div>
@@ -198,7 +198,7 @@ const submitTransaction = () => {
                         <CardTitle class="text-sm font-semibold tracking-tight text-red-950 dark:text-red-400">
                             Total Debt
                         </CardTitle>
-                        <p class="text-[10px] text-red-900/60 dark:text-red-400/60 font-medium">
+                        <p class="text-xs text-red-900/60 dark:text-red-400/60 font-medium">
                             Credit Card Liabilities
                         </p>
                     </div>

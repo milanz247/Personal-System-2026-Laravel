@@ -20,6 +20,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::put('accounts/{account}/balance', [AccountController::class, 'updateBalance'])->name('accounts.update-balance');
     Route::resource('accounts', AccountController::class)->except(['create', 'show', 'edit']);
     Route::post('transactions', [TransactionController::class, 'store'])->name('transactions.store');
+    Route::get('transactions', [TransactionController::class, 'index'])->name('transactions.index');
 });
 
 require __DIR__.'/settings.php';
