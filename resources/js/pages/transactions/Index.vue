@@ -48,9 +48,11 @@ const props = defineProps<{
         to_account_id: number | null;
         category: string | null;
         description: string | null;
+        updated_at: string;
         account: {
             id: number;
             name: string;
+            currency: string;
         } | null;
         to_account: {
             id: number;
@@ -123,22 +125,40 @@ const filteredTransactions = computed(() => {
     });
 });
 
-// Financial Stats Summary (based on all loaded transactions)
+// There is no currency conversion in the system, so the summary cards only ever
+// combine transactions whose source account shares the most common account currency
+// — matching the Dashboard's approach — rather than silently summing mixed currencies.
+const primaryCurrency = computed(() => {
+    if (props.accounts.length === 0) return 'LKR';
+    const counts = new Map<string, number>();
+    for (const acc of props.accounts) {
+        counts.set(acc.currency, (counts.get(acc.currency) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+});
+
+const isPrimaryCurrencyTx = (tx: (typeof props.transactions)[number]) => {
+    return (tx.account?.currency ?? primaryCurrency.value) === primaryCurrency.value;
+};
+
+// Financial Stats Summary (based on all loaded transactions in the primary currency)
 const totalInflow = computed(() => {
     return props.transactions
-        .filter(t => t.type === 'income')
+        .filter(t => t.type === 'income' && isPrimaryCurrencyTx(t))
         .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 });
 
 const totalOutflow = computed(() => {
     return props.transactions
-        .filter(t => t.type === 'expense')
+        .filter(t => t.type === 'expense' && isPrimaryCurrencyTx(t))
         .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 });
 
 const netFlow = computed(() => {
     return totalInflow.value - totalOutflow.value;
 });
+
+const excludedCurrencyCount = computed(() => props.transactions.filter(t => !isPrimaryCurrencyTx(t)).length);
 
 // Formatting Utilities
 const formatCurrency = (val: number, currency: string = 'LKR') => {
@@ -207,6 +227,10 @@ const editForm = useForm({
     to_account_id: '' as string | number,
     category: '',
     description: '',
+    // Optimistic-locking token — the updated_at snapshot taken when this row was
+    // opened for editing, so a stale edit (changed elsewhere in the meantime) is
+    // rejected instead of silently overwriting someone else's more recent change.
+    updated_at: '',
 });
 
 const editableCategories = computed(() => {
@@ -224,6 +248,7 @@ const openEditSheet = (tx: (typeof props.transactions)[number]) => {
     editForm.to_account_id = tx.to_account_id ?? '';
     editForm.category = tx.category ?? '';
     editForm.description = tx.description ?? '';
+    editForm.updated_at = tx.updated_at;
     isEditDialogOpen.value = true;
 };
 
@@ -259,6 +284,14 @@ const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
                 <Plus class="size-4 mr-2" />
                 Add Transaction
             </Button>
+        </div>
+
+        <div
+            v-if="excludedCurrencyCount > 0"
+            class="p-3 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded-lg text-xs font-semibold"
+        >
+            {{ excludedCurrencyCount }} transaction{{ excludedCurrencyCount === 1 ? '' : 's' }} in a different currency than {{ primaryCurrency }}
+            {{ excludedCurrencyCount === 1 ? 'is' : 'are' }} not included in the totals below — currency conversion isn't supported yet.
         </div>
 
         <!-- Premium Mini-Stats Row -->
@@ -417,17 +450,17 @@ const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
                             <td class="px-4 py-3.5 align-middle text-right font-mono font-semibold tracking-tight text-sm tabular-nums whitespace-nowrap">
                                 <div>
                                     <span v-if="tx.type === 'income'" class="text-emerald-600 dark:text-emerald-500">
-                                        + {{ formatCurrency(parseFloat(tx.amount)) }}
+                                        + {{ formatCurrency(parseFloat(tx.amount), tx.account?.currency) }}
                                     </span>
                                     <span v-else-if="tx.type === 'expense'" class="text-foreground">
-                                        - {{ formatCurrency(parseFloat(tx.amount)) }}
+                                        - {{ formatCurrency(parseFloat(tx.amount), tx.account?.currency) }}
                                     </span>
                                     <span v-else class="text-muted-foreground">
-                                        {{ formatCurrency(parseFloat(tx.amount)) }}
+                                        {{ formatCurrency(parseFloat(tx.amount), tx.account?.currency) }}
                                     </span>
                                 </div>
                                 <div v-if="parseFloat(tx.fee) > 0" class="text-[10px] text-amber-600 dark:text-amber-500 font-semibold mt-0.5">
-                                    + {{ formatCurrency(parseFloat(tx.fee)) }} fee
+                                    + {{ formatCurrency(parseFloat(tx.fee), tx.account?.currency) }} fee
                                 </div>
                             </td>
                             <td class="px-4 py-3.5 align-middle text-right whitespace-nowrap">
@@ -657,6 +690,9 @@ const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
                 <form @submit.prevent="submitEditTransaction" class="space-y-5">
                     <div v-if="editForm.errors.balance" class="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 rounded-lg text-xs font-semibold">
                         {{ editForm.errors.balance }}
+                    </div>
+                    <div v-if="editForm.errors.conflict" class="p-3 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded-lg text-xs font-semibold">
+                        {{ editForm.errors.conflict }}
                     </div>
 
                     <!-- Type Tabs Toggle -->

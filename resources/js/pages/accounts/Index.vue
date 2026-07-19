@@ -50,6 +50,7 @@ const props = defineProps<{
         currency: string;
         balance: string;
         credit_limit: string | null;
+        updated_at: string;
     }>;
 }>();
 
@@ -79,6 +80,8 @@ const form = useForm({
     balance: 0,
     credit_limit: 0,
     currency: 'LKR',
+    // Optimistic-locking token, only meaningful (and only sent) on edit.
+    updated_at: '',
 });
 
 const isUpdateBalanceOpen = ref(false);
@@ -127,6 +130,7 @@ const openEditModal = (account: typeof props.accounts[0]) => {
         : parseFloat(account.balance);
     form.credit_limit = account.credit_limit ? parseFloat(account.credit_limit) : 0;
     form.currency = account.currency;
+    form.updated_at = account.updated_at;
     isDialogOpen.value = true;
 };
 
@@ -553,6 +557,12 @@ const getBadgeLabel = (account: typeof props.accounts[0]) => {
                 </DialogHeader>
 
                 <form @submit.prevent="submitForm" class="space-y-4 py-2">
+                    <div v-if="form.errors.conflict" class="p-3 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded-lg text-xs font-semibold">
+                        {{ form.errors.conflict }}
+                    </div>
+                    <div v-if="form.errors.type" class="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 rounded-lg text-xs font-semibold">
+                        {{ form.errors.type }}
+                    </div>
                     <div class="grid gap-2">
                         <Label for="name">Account Name</Label>
                         <Input 
@@ -566,7 +576,7 @@ const getBadgeLabel = (account: typeof props.accounts[0]) => {
 
                     <div class="grid gap-2">
                         <Label for="type">Account Type</Label>
-                        <Select v-model="form.type" :disabled="isEditing && form.type === 'cash_wallet'">
+                        <Select v-model="form.type" :disabled="isEditing">
                             <SelectTrigger id="type">
                                 <SelectValue placeholder="Select type" />
                             </SelectTrigger>
@@ -578,6 +588,7 @@ const getBadgeLabel = (account: typeof props.accounts[0]) => {
                                 <SelectItem value="investment">Investment Asset</SelectItem>
                             </SelectContent>
                         </Select>
+                        <p v-if="isEditing" class="text-xs text-muted-foreground">Type can't be changed after creation — create a new account instead.</p>
                     </div>
 
                     <div v-if="!isEditing" class="grid gap-2">

@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Validation\ValidationException;
 
 #[Fillable([
     'name',
@@ -17,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class Account extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     /**
      * Get the attributes that should be cast.
@@ -62,9 +65,6 @@ class Account extends Model
 
     /**
      * Check if a credit card transaction of the given amount is within the credit limit.
-     *
-     * @param float $amount
-     * @return bool
      */
     public function hasAvailableCredit(float $amount): bool
     {
@@ -81,14 +81,13 @@ class Account extends Model
     /**
      * Validate and throw validation exception if the expense exceeds available credit.
      *
-     * @param float $amount
-     * @throws \Illuminate\Validation\ValidationException
+     * @throws ValidationException
      */
     public function validateExpense(float $amount): void
     {
-        if (!$this->hasAvailableCredit($amount)) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'balance' => ['Transaction Declined! This expense exceeds your available credit limit.']
+        if (! $this->hasAvailableCredit($amount)) {
+            throw ValidationException::withMessages([
+                'balance' => ['Transaction Declined! This expense exceeds your available credit limit.'],
             ]);
         }
     }
@@ -96,7 +95,7 @@ class Account extends Model
     /**
      * Get the transactions for the account (as source account).
      */
-    public function transactions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class, 'account_id');
     }
@@ -104,7 +103,7 @@ class Account extends Model
     /**
      * Get the incoming transfers for the account (as destination account).
      */
-    public function incomingTransfers(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function incomingTransfers(): HasMany
     {
         return $this->hasMany(Transaction::class, 'to_account_id');
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Category;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -41,11 +42,7 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
                 'categories' => $request->user()
-                    ? \App\Models\Category::query()
-                        ->whereNull('user_id')
-                        ->orWhere('user_id', $request->user()->id)
-                        ->orderBy('name')
-                        ->get()
+                    ? Category::query()->orderBy('name')->get()
                     : [],
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',

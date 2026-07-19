@@ -66,7 +66,7 @@ test('deleting a transaction reverses its balance effect', function () {
 
     $account->refresh();
     expect((float) $account->balance)->toBe(10000.0);
-    $this->assertDatabaseMissing('transactions', ['id' => $transaction->id]);
+    $this->assertSoftDeleted('transactions', ['id' => $transaction->id]);
 });
 
 test('deleting a transfer reverses the effect on both accounts', function () {
@@ -138,4 +138,76 @@ test('an account with transaction history cannot be deleted', function () {
 
     $response->assertSessionHasErrors(['account']);
     $this->assertDatabaseHas('accounts', ['id' => $account->id]);
+});
+
+test('an identical double-submitted transaction is not recorded twice', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 10000]);
+    Category::create(['user_id' => $user->id, 'name' => 'Groceries', 'type' => 'expense']);
+
+    $payload = [
+        'type' => 'expense',
+        'amount' => 500,
+        'fee' => 0,
+        'date' => now()->toDateString(),
+        'account_id' => $account->id,
+        'category' => 'Groceries',
+    ];
+
+    $this->actingAs($user)->post(route('transactions.store'), $payload);
+    $this->actingAs($user)->post(route('transactions.store'), $payload);
+
+    expect(Transaction::count())->toBe(1);
+
+    $account->refresh();
+    expect((float) $account->balance)->toBe(9500.0);
+});
+
+test('a transaction date far in the past is rejected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 10000]);
+    Category::create(['user_id' => $user->id, 'name' => 'Groceries', 'type' => 'expense']);
+
+    $response = $this->actingAs($user)->post(route('transactions.store'), [
+        'type' => 'expense',
+        'amount' => 500,
+        'fee' => 0,
+        'date' => '1899-01-01',
+        'account_id' => $account->id,
+        'category' => 'Groceries',
+    ]);
+
+    $response->assertSessionHasErrors(['date']);
+    expect(Transaction::count())->toBe(0);
+});
+
+test('editing a transaction with a stale updated_at token is rejected as a conflict', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 10000]);
+    Category::create(['user_id' => $user->id, 'name' => 'Groceries', 'type' => 'expense']);
+
+    $this->actingAs($user)->post(route('transactions.store'), [
+        'type' => 'expense',
+        'amount' => 500,
+        'fee' => 0,
+        'date' => now()->toDateString(),
+        'account_id' => $account->id,
+        'category' => 'Groceries',
+    ]);
+
+    $transaction = Transaction::first();
+    $staleTimestamp = $transaction->updated_at->subMinute()->toJSON();
+
+    $response = $this->actingAs($user)->put(route('transactions.update', $transaction), [
+        'type' => 'expense',
+        'amount' => 999,
+        'fee' => 0,
+        'date' => now()->toDateString(),
+        'account_id' => $account->id,
+        'category' => 'Groceries',
+        'updated_at' => $staleTimestamp,
+    ]);
+
+    $response->assertSessionHasErrors(['conflict']);
+    $this->assertDatabaseHas('transactions', ['id' => $transaction->id, 'amount' => 500]);
 });

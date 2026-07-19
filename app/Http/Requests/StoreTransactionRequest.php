@@ -26,7 +26,7 @@ class StoreTransactionRequest extends FormRequest
             'type' => 'required|in:income,expense,transfer',
             'amount' => 'required|numeric|min:0.01|max:99999999999.99',
             'fee' => 'nullable|numeric|min:0|max:99999999999.99',
-            'date' => 'required|date|before_or_equal:today',
+            'date' => 'required|date|after_or_equal:2000-01-01|before_or_equal:today',
             'account_id' => 'required|integer|exists:accounts,id',
             'to_account_id' => 'required_if:type,transfer|nullable|integer|exists:accounts,id|different:account_id',
             'category' => 'required_unless:type,transfer|nullable|string|max:255',
@@ -44,6 +44,7 @@ class StoreTransactionRequest extends FormRequest
         return [
             'amount.max' => 'The transaction amount exceeds the maximum allowed limit.',
             'date.before_or_equal' => 'The transaction date cannot be in the future.',
+            'date.after_or_equal' => 'The transaction date is too far in the past to be valid.',
             'to_account_id.different' => 'The source and destination accounts must be different.',
             'to_account_id.required_if' => 'A destination account is required for transfers.',
             'category.required_unless' => 'A category is required for income and expense transactions.',

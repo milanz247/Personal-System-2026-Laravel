@@ -48,6 +48,8 @@ const props = defineProps<{
         monthlyIncome: number;
         monthlyExpenses: number;
         monthlyFees: number;
+        primaryCurrency: string;
+        excludedAccountsCount: number;
     };
     accounts: Array<{
         id: number;
@@ -214,6 +216,16 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
             </Button>
         </div>
 
+        <!-- Multi-currency warning: totals below only combine same-currency accounts,
+             since there is no exchange-rate conversion in the system yet. -->
+        <div
+            v-if="metrics.excludedAccountsCount > 0"
+            class="p-3 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded-lg text-xs font-semibold"
+        >
+            {{ metrics.excludedAccountsCount }} account{{ metrics.excludedAccountsCount === 1 ? '' : 's' }} in a different currency than {{ metrics.primaryCurrency }}
+            {{ metrics.excludedAccountsCount === 1 ? 'is' : 'are' }} not included in the totals below — currency conversion isn't supported yet.
+        </div>
+
         <!-- Professional 4-Card Grid Layout with Formula Labels -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             
@@ -234,7 +246,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                 </CardHeader>
                 <CardContent>
                     <div class="text-2xl font-bold tracking-tight text-foreground">
-                        {{ formatCurrency(metrics.netWorth) }}
+                        {{ formatCurrency(metrics.netWorth, metrics.primaryCurrency) }}
                     </div>
                 </CardContent>
             </Card>
@@ -256,7 +268,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                 </CardHeader>
                 <CardContent>
                     <div class="text-2xl font-bold tracking-tight text-foreground">
-                        {{ formatCurrency(metrics.liquidCash) }}
+                        {{ formatCurrency(metrics.liquidCash, metrics.primaryCurrency) }}
                     </div>
                 </CardContent>
             </Card>
@@ -278,7 +290,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                 </CardHeader>
                 <CardContent>
                     <div class="text-2xl font-bold tracking-tight text-foreground">
-                        {{ formatCurrency(metrics.cashInHand) }}
+                        {{ formatCurrency(metrics.cashInHand, metrics.primaryCurrency) }}
                     </div>
                 </CardContent>
             </Card>
@@ -300,7 +312,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                 </CardHeader>
                 <CardContent>
                     <div class="text-2xl font-bold tracking-tight text-red-600 dark:text-red-400">
-                        {{ formatCurrency(metrics.totalDebt) }}
+                        {{ formatCurrency(metrics.totalDebt, metrics.primaryCurrency) }}
                     </div>
                 </CardContent>
             </Card>
@@ -322,7 +334,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                     </CardHeader>
                     <CardContent class="px-5 pb-4">
                         <div class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-500">
-                            + {{ formatCurrency(metrics.monthlyIncome) }}
+                            + {{ formatCurrency(metrics.monthlyIncome, metrics.primaryCurrency) }}
                         </div>
                     </CardContent>
                 </Card>
@@ -337,7 +349,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                     </CardHeader>
                     <CardContent class="px-5 pb-4">
                         <div class="text-xl font-bold tracking-tight text-red-600 dark:text-red-500">
-                            - {{ formatCurrency(metrics.monthlyExpenses) }}
+                            - {{ formatCurrency(metrics.monthlyExpenses, metrics.primaryCurrency) }}
                         </div>
                     </CardContent>
                 </Card>
@@ -352,7 +364,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', yea
                     </CardHeader>
                     <CardContent class="px-5 pb-4">
                         <div class="text-xl font-bold tracking-tight text-amber-600 dark:text-amber-500">
-                            {{ formatCurrency(metrics.monthlyFees) }}
+                            {{ formatCurrency(metrics.monthlyFees, metrics.primaryCurrency) }}
                         </div>
                     </CardContent>
                 </Card>

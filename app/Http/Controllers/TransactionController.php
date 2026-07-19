@@ -27,11 +27,7 @@ class TransactionController extends Controller
 
         $accounts = Account::orderBy('name', 'asc')->get();
 
-        $categories = Category::query()
-            ->whereNull('user_id')
-            ->orWhere('user_id', auth()->id())
-            ->orderBy('name')
-            ->get();
+        $categories = Category::query()->orderBy('name')->get();
 
         return Inertia::render('transactions/Index', [
             'transactions' => $transactions,
@@ -59,6 +55,28 @@ class TransactionController extends Controller
         $amount = (float) $validated['amount'];
         $fee = (float) ($validated['fee'] ?? 0);
 
+        // Guard against double-clicks and network-retry double-submits: an identical
+        // transaction created moments ago is treated as a duplicate, not a new entry.
+        $isDuplicate = Transaction::query()
+            ->where('account_id', $validated['account_id'])
+            ->where('type', $validated['type'])
+            ->where('amount', $amount)
+            ->where('fee', $fee)
+            ->where('to_account_id', $validated['to_account_id'] ?? null)
+            ->where('category', $validated['category'] ?? null)
+            ->where('description', $validated['description'] ?? null)
+            ->where('created_at', '>=', now()->subSeconds(5))
+            ->exists();
+
+        if ($isDuplicate) {
+            Inertia::flash('toast', [
+                'type' => 'info',
+                'message' => __('This looks identical to the transaction you just submitted, so it was not recorded again.'),
+            ]);
+
+            return redirect()->back();
+        }
+
         DB::transaction(function () use ($validated, $amount, $fee) {
             $transaction = new Transaction;
             $this->applyTransactionEffect($transaction, $validated, $amount, $fee);
@@ -79,9 +97,17 @@ class TransactionController extends Controller
      */
     public function update(UpdateTransactionRequest $request, Transaction $transaction): RedirectResponse
     {
+        $this->authorize('update', $transaction);
+
         $validated = $request->validated();
         $amount = (float) $validated['amount'];
         $fee = (float) ($validated['fee'] ?? 0);
+
+        if (! empty($validated['updated_at']) && ! $transaction->updated_at->equalTo($validated['updated_at'])) {
+            throw ValidationException::withMessages([
+                'conflict' => ['This transaction was changed elsewhere since you opened it. Reload the page and try again.'],
+            ]);
+        }
 
         DB::transaction(function () use ($transaction, $validated, $amount, $fee) {
             $this->reverseTransactionEffect($transaction);
@@ -102,6 +128,8 @@ class TransactionController extends Controller
      */
     public function destroy(Transaction $transaction): RedirectResponse
     {
+        $this->authorize('delete', $transaction);
+
         DB::transaction(function () use ($transaction) {
             $this->reverseTransactionEffect($transaction);
             $transaction->delete();
@@ -155,6 +183,7 @@ class TransactionController extends Controller
             $transaction->account_id = $sourceAccount->id;
             $transaction->to_account_id = null;
             $transaction->category = $validated['category'];
+            $transaction->balance_after = $sourceAccount->balance;
         } elseif ($validated['type'] === 'expense') {
             // Expense: deduct amount + fee from account
             $sourceAccount->balance -= $totalDebit;
@@ -163,6 +192,7 @@ class TransactionController extends Controller
             $transaction->account_id = $sourceAccount->id;
             $transaction->to_account_id = null;
             $transaction->category = $validated['category'];
+            $transaction->balance_after = $sourceAccount->balance;
         } elseif ($validated['type'] === 'transfer') {
             $destinationAccount = Account::where('id', $validated['to_account_id'])
                 ->lockForUpdate()
@@ -187,6 +217,9 @@ class TransactionController extends Controller
             $transaction->account_id = $sourceAccount->id;
             $transaction->to_account_id = $destinationAccount->id;
             $transaction->category = null;
+            // Snapshot the source account's balance — the transaction row only has
+            // room for one snapshot, and the source is the "primary" side of a transfer.
+            $transaction->balance_after = $sourceAccount->balance;
         }
     }
 

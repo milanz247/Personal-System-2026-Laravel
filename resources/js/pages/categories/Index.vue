@@ -13,7 +13,7 @@ import {
     SheetTitle,
     SheetFooter,
 } from '@/components/ui/sheet';
-import { 
+import {
     Plus,
     Trash2,
     Tags,
@@ -21,7 +21,8 @@ import {
     Lock,
     ArrowUpRight,
     ArrowDownLeft,
-    Tag
+    Tag,
+    Pencil
 } from '@lucide/vue';
 
 defineOptions({
@@ -92,9 +93,36 @@ const submitCategory = () => {
 };
 
 const deleteCategory = (id: number) => {
-    if (confirm('Are you sure you want to delete this category? Any associated transaction will retain its label, but the category category record itself will be permanently deleted.')) {
+    if (confirm('Are you sure you want to delete this category? This will fail if any transaction still uses it.')) {
         router.delete(`/categories/${id}`);
     }
+};
+
+// Rename (edit) a category
+const isEditDialogOpen = ref(false);
+const editingCategoryId = ref<number | null>(null);
+
+const editForm = useForm({
+    name: '',
+    icon: '',
+});
+
+const openEditSheet = (category: (typeof props.categories)[number]) => {
+    editingCategoryId.value = category.id;
+    editForm.clearErrors();
+    editForm.name = category.name;
+    editForm.icon = category.icon ?? '';
+    isEditDialogOpen.value = true;
+};
+
+const submitEditCategory = () => {
+    if (!editingCategoryId.value) return;
+    editForm.put(`/categories/${editingCategoryId.value}`, {
+        onSuccess: () => {
+            isEditDialogOpen.value = false;
+            editingCategoryId.value = null;
+        },
+    });
 };
 </script>
 
@@ -252,14 +280,22 @@ const deleteCategory = (id: number) => {
                             >
                                 <Lock class="size-3.5" />
                             </span>
-                            <button
-                                v-else
-                                @click="deleteCategory(category.id)"
-                                class="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
-                                title="Delete Category"
-                            >
-                                <Trash2 class="size-4" />
-                            </button>
+                            <template v-else>
+                                <button
+                                    @click="openEditSheet(category)"
+                                    class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+                                    title="Rename Category"
+                                >
+                                    <Pencil class="size-4" />
+                                </button>
+                                <button
+                                    @click="deleteCategory(category.id)"
+                                    class="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+                                    title="Delete Category"
+                                >
+                                    <Trash2 class="size-4" />
+                                </button>
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -327,6 +363,47 @@ const deleteCategory = (id: number) => {
                         </Button>
                         <Button type="submit" :disabled="form.processing" class="w-full sm:w-auto">
                             {{ form.processing ? 'Saving...' : 'Add Category' }}
+                        </Button>
+                    </SheetFooter>
+                </form>
+            </SheetContent>
+        </Sheet>
+
+        <!-- Edit (Rename) Category Sheet -->
+        <Sheet v-model:open="isEditDialogOpen">
+            <SheetContent side="right" class="w-full sm:max-w-[500px] p-6 sm:p-8 overflow-y-auto space-y-6">
+                <SheetHeader>
+                    <SheetTitle>Rename Category</SheetTitle>
+                    <SheetDescription>
+                        Update this category's name. Its type cannot be changed.
+                    </SheetDescription>
+                </SheetHeader>
+
+                <form @submit.prevent="submitEditCategory" class="space-y-5">
+                    <div class="space-y-1.5">
+                        <Label for="edit_cat_name">Category Name</Label>
+                        <Input
+                            id="edit_cat_name"
+                            type="text"
+                            v-model="editForm.name"
+                            class="text-sm"
+                            required
+                        />
+                        <div v-if="editForm.errors.name" class="text-xs text-destructive">{{ editForm.errors.name }}</div>
+                    </div>
+
+                    <SheetFooter class="pt-4 flex flex-row gap-3 justify-end">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            @click="isEditDialogOpen = false"
+                            :disabled="editForm.processing"
+                            class="w-full sm:w-auto"
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" :disabled="editForm.processing" class="w-full sm:w-auto">
+                            {{ editForm.processing ? 'Saving...' : 'Save Changes' }}
                         </Button>
                     </SheetFooter>
                 </form>

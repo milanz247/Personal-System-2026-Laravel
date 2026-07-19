@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'account_id',
@@ -15,12 +16,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'category',
     'amount',
     'fee',
+    'balance_after',
     'description',
     'date',
 ])]
 class Transaction extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     /**
      * Get the attributes that should be cast.
@@ -32,6 +34,7 @@ class Transaction extends Model
         return [
             'amount' => 'decimal:2',
             'fee' => 'decimal:2',
+            'balance_after' => 'decimal:2',
             'date' => 'datetime',
         ];
     }

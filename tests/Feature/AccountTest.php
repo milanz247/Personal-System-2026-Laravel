@@ -124,14 +124,15 @@ test('strict data isolation prevents users from updating other users accounts', 
 
 test('authenticated user can delete their own account', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    // A zero balance and no transaction history — both are now required to delete.
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 0, 'credit_limit' => null]);
 
     $response = $this
         ->actingAs($user)
         ->delete(route('accounts.destroy', $account));
 
     $response->assertRedirect();
-    $this->assertDatabaseMissing('accounts', [
+    $this->assertSoftDeleted('accounts', [
         'id' => $account->id,
     ]);
 });
@@ -318,6 +319,66 @@ test('authenticated user can update credit card outstanding debt which automatic
     ]);
 });
 
+test('deleting an account with a non-zero balance but no transaction history is blocked', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 5000, 'credit_limit' => null]);
+
+    $response = $this->actingAs($user)->delete(route('accounts.destroy', $account));
+
+    $response->assertSessionHasErrors(['account']);
+    $this->assertDatabaseHas('accounts', ['id' => $account->id]);
+});
+
+test('an account type cannot be changed after creation', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 1000, 'credit_limit' => null]);
+
+    $response = $this->actingAs($user)->put(route('accounts.update', $account), [
+        'name' => $account->name,
+        'type' => 'investment',
+    ]);
+
+    $response->assertSessionHasErrors(['type']);
+    $this->assertDatabaseHas('accounts', ['id' => $account->id, 'type' => 'bank_account']);
+});
+
+test('creating an account with an opening balance records a ledger transaction', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)->post(route('accounts.store'), [
+        'name' => 'Opening Balance Test',
+        'type' => 'bank_account',
+        'balance' => 7500,
+        'currency' => 'LKR',
+    ]);
+
+    $account = Account::where('name', 'Opening Balance Test')->first();
+
+    $this->assertDatabaseHas('transactions', [
+        'account_id' => $account->id,
+        'type' => 'income',
+        'category' => 'Opening Balance',
+        'amount' => 7500,
+        'balance_after' => 7500,
+    ]);
+});
+
+test('editing an account with a stale updated_at token is rejected as a conflict', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 1000, 'credit_limit' => null]);
+
+    $staleTimestamp = $account->updated_at->subMinute()->toJSON();
+
+    $response = $this->actingAs($user)->put(route('accounts.update', $account), [
+        'name' => 'Renamed',
+        'type' => 'bank_account',
+        'updated_at' => $staleTimestamp,
+    ]);
+
+    $response->assertSessionHasErrors(['conflict']);
+    $this->assertDatabaseHas('accounts', ['id' => $account->id, 'name' => $account->name]);
+});
+
 test('updating credit card balance above credit limit is blocked by validation', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create([
@@ -341,4 +402,17 @@ test('updating credit card balance above credit limit is blocked by validation',
         'id' => $account->id,
         'balance' => -20000.00,
     ]);
+});
+
+test('a soft-deleted account is hidden from the index and its name can be reused', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'name' => 'Retired Account', 'balance' => 0, 'credit_limit' => null]);
+
+    $this->actingAs($user)->delete(route('accounts.destroy', $account));
+
+    $response = $this->actingAs($user)->get(route('accounts.index'));
+    $response->assertInertia(fn ($page) => $page->where('accounts', fn ($accounts) => collect($accounts)->doesntContain('id', $account->id)));
+
+    // The row is still recoverable in the database, just hidden from normal queries.
+    $this->assertSoftDeleted('accounts', ['id' => $account->id]);
 });
