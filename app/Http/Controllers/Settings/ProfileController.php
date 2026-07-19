@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProfileController extends Controller
 {
@@ -32,7 +33,7 @@ class ProfileController extends Controller
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
         $user = $request->user();
-        
+
         // Fill only email in user model
         $user->fill($request->safe()->only(['email']));
 
@@ -57,12 +58,12 @@ class ProfileController extends Controller
     /**
      * Download the authenticated user's uploaded document securely.
      */
-    public function downloadDocument(string $type): \Symfony\Component\HttpFoundation\StreamedResponse
+    public function downloadDocument(string $type): StreamedResponse
     {
         $user = Auth::user();
         $profile = $user?->profile;
 
-        if (!$profile) {
+        if (! $profile) {
             abort(404);
         }
 
@@ -73,7 +74,7 @@ class ProfileController extends Controller
             default => abort(404),
         };
 
-        if (!Storage::exists($path)) {
+        if (! Storage::exists($path)) {
             abort(404);
         }
 
@@ -88,6 +89,16 @@ class ProfileController extends Controller
         $user = $request->user();
 
         Auth::logout();
+
+        $profile = $user->profile;
+
+        if ($profile) {
+            foreach ([$profile->birth_certificate_path, $profile->nic_front_path, $profile->nic_back_path] as $path) {
+                if ($path && Storage::exists($path)) {
+                    Storage::delete($path);
+                }
+            }
+        }
 
         $user->delete();
 

@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Account;
+use App\Models\Transaction;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -41,8 +44,8 @@ class AccountController extends Controller
         $request->validate($rules);
 
         if ($request->name === 'Cash Wallet') {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'name' => ['The name "Cash Wallet" is reserved for the default cash wallet.']
+            throw ValidationException::withMessages([
+                'name' => ['The name "Cash Wallet" is reserved for the default cash wallet.'],
             ]);
         }
 
@@ -68,14 +71,17 @@ class AccountController extends Controller
     }
 
     /**
-     * Update the specified account.
+     * Update the specified account's details.
+     *
+     * Balance is intentionally not editable here — it can only be changed via
+     * updateBalance(), which records an offsetting adjustment transaction so the
+     * change stays reconcilable against the ledger instead of silently overwriting it.
      */
     public function update(Request $request, Account $account): RedirectResponse
     {
         $rules = [
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', 'string', 'in:cash_wallet,bank_account,credit_card,investment'],
-            'balance' => ['required', 'numeric', 'min:0'],
             'currency' => ['nullable', 'string', 'size:3'],
         ];
 
@@ -86,20 +92,14 @@ class AccountController extends Controller
         $request->validate($rules);
 
         if ($request->name === 'Cash Wallet' && ($account->name !== 'Cash Wallet' || $account->type !== 'cash_wallet')) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'name' => ['The name "Cash Wallet" is reserved for the default cash wallet.']
+            throw ValidationException::withMessages([
+                'name' => ['The name "Cash Wallet" is reserved for the default cash wallet.'],
             ]);
-        }
-
-        $balance = (float) $request->balance;
-        if ($request->type === 'credit_card') {
-            $balance = -$balance;
         }
 
         $account->update([
             'name' => $request->name,
             'type' => $request->type,
-            'balance' => $balance,
             'currency' => $request->currency ?? 'LKR',
             'credit_limit' => $request->type === 'credit_card' ? $request->credit_limit : null,
         ]);
@@ -114,10 +114,6 @@ class AccountController extends Controller
 
     /**
      * Update the account balance and record adjustment transactions.
-     *
-     * @param Request $request
-     * @param Account $account
-     * @return RedirectResponse
      */
     public function updateBalance(Request $request, Account $account): RedirectResponse
     {
@@ -132,21 +128,21 @@ class AccountController extends Controller
 
         // Validate credit card limit
         if ($account->type === 'credit_card' && abs($newBalance) > (float) $account->credit_limit) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'balance' => ['Transaction Declined! This balance adjustment exceeds your credit limit.']
+            throw ValidationException::withMessages([
+                'balance' => ['Transaction Declined! This balance adjustment exceeds your credit limit.'],
             ]);
         }
 
         $oldBalance = (float) $account->balance;
         $diff = $newBalance - $oldBalance;
 
-        \Illuminate\Support\Facades\DB::transaction(function () use ($account, $newBalance, $diff, $oldBalance) {
+        DB::transaction(function () use ($account, $newBalance, $diff, $oldBalance) {
             $account->update([
                 'balance' => $newBalance,
             ]);
 
             if ($diff != 0) {
-                \App\Models\Transaction::create([
+                Transaction::create([
                     'account_id' => $account->id,
                     'type' => $diff > 0 ? 'income' : 'expense',
                     'category' => $diff > 0 ? 'Balance Adjustment / Interest' : 'Balance Adjustment / Loss',
@@ -174,8 +170,16 @@ class AccountController extends Controller
     public function destroy(Account $account): RedirectResponse
     {
         if ($account->name === 'Cash Wallet' && $account->type === 'cash_wallet') {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'account' => ['The default Cash Wallet cannot be deleted.']
+            throw ValidationException::withMessages([
+                'account' => ['The default Cash Wallet cannot be deleted.'],
+            ]);
+        }
+
+        $hasHistory = $account->transactions()->exists() || $account->incomingTransfers()->exists();
+
+        if ($hasHistory) {
+            throw ValidationException::withMessages([
+                'account' => ['This account has transaction history and cannot be deleted. Remove or reassign its transactions first, or keep it as a record of past activity.'],
             ]);
         }
 

@@ -580,21 +580,24 @@ const getBadgeLabel = (account: typeof props.accounts[0]) => {
                         </Select>
                     </div>
 
-                    <div class="grid gap-2">
+                    <div v-if="!isEditing" class="grid gap-2">
                         <Label for="balance">
                             {{ form.type === 'credit_card' ? 'Current Outstanding Debt (LKR)' : 'Initial/Current Balance (LKR)' }}
                         </Label>
-                        <Input 
-                            id="balance" 
-                            type="number" 
-                            step="0.01" 
-                            v-model="form.balance" 
+                        <Input
+                            id="balance"
+                            type="number"
+                            step="0.01"
+                            v-model="form.balance"
                             min="0"
                             placeholder="0.00"
-                            required 
+                            required
                         />
                         <div v-if="form.errors.balance" class="text-sm text-destructive">{{ form.errors.balance }}</div>
                     </div>
+                    <p v-else class="text-xs text-muted-foreground -mt-1">
+                        Balance can't be edited here — use "Update Balance" from the account menu so the change is recorded as a transaction.
+                    </p>
 
                     <div v-if="form.type === 'credit_card'" class="grid gap-2">
                         <Label for="credit_limit">Credit Limit (LKR)</Label>

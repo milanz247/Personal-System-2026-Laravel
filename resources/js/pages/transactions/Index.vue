@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, useForm, router } from '@inertiajs/vue3';
 import { index as transactionsIndex } from '@/routes/transactions';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,9 @@ import {
     ArrowRightLeft,
     TrendingUp,
     TrendingDown,
-    Search
+    Search,
+    Pencil,
+    Trash2
 } from '@lucide/vue';
 
 defineOptions({
@@ -40,6 +42,7 @@ const props = defineProps<{
         user_id: number;
         type: 'income' | 'expense' | 'transfer';
         amount: string;
+        fee: string;
         date: string;
         account_id: number | null;
         to_account_id: number | null;
@@ -78,6 +81,7 @@ const todayStr = new Date().toISOString().split('T')[0];
 const form = useForm({
     type: 'expense' as 'income' | 'expense' | 'transfer',
     amount: '',
+    fee: '',
     date: todayStr,
     account_id: '',
     to_account_id: '',
@@ -179,6 +183,7 @@ const submitTransaction = () => {
             form.reset({
                 type: form.type,
                 amount: '',
+                fee: '',
                 date: todayStr,
                 account_id: '',
                 to_account_id: '',
@@ -187,6 +192,56 @@ const submitTransaction = () => {
             });
         },
     });
+};
+
+// Edit Transaction
+const isEditDialogOpen = ref(false);
+const editingTransactionId = ref<number | null>(null);
+
+const editForm = useForm({
+    type: 'expense' as 'income' | 'expense' | 'transfer',
+    amount: '',
+    fee: '',
+    date: todayStr,
+    account_id: '' as string | number,
+    to_account_id: '' as string | number,
+    category: '',
+    description: '',
+});
+
+const editableCategories = computed(() => {
+    return props.categories.filter(c => c.type === editForm.type);
+});
+
+const openEditSheet = (tx: (typeof props.transactions)[number]) => {
+    editingTransactionId.value = tx.id;
+    editForm.clearErrors();
+    editForm.type = tx.type;
+    editForm.amount = tx.amount;
+    editForm.fee = tx.fee;
+    editForm.date = tx.date.split('T')[0];
+    editForm.account_id = tx.account_id ?? '';
+    editForm.to_account_id = tx.to_account_id ?? '';
+    editForm.category = tx.category ?? '';
+    editForm.description = tx.description ?? '';
+    isEditDialogOpen.value = true;
+};
+
+const submitEditTransaction = () => {
+    if (!editingTransactionId.value) return;
+    editForm.put(`/transactions/${editingTransactionId.value}`, {
+        onSuccess: () => {
+            isEditDialogOpen.value = false;
+            editingTransactionId.value = null;
+        },
+    });
+};
+
+const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
+    if (!confirm('Delete this transaction? Its balance effect will be reversed on the affected account(s).')) {
+        return;
+    }
+    router.delete(`/transactions/${tx.id}`);
 };
 </script>
 
@@ -315,11 +370,12 @@ const submitTransaction = () => {
                             <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Account</th>
                             <th class="px-4 py-3.5 text-left align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Type</th>
                             <th class="px-4 py-3.5 text-right align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Amount</th>
+                            <th class="px-4 py-3.5 text-right align-middle font-semibold text-muted-foreground uppercase tracking-wider text-[11px]">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-border/40">
                         <tr v-if="filteredTransactions.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground font-medium">
+                            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground font-medium">
                                 No matching transactions found.
                             </td>
                         </tr>
@@ -359,15 +415,42 @@ const submitTransaction = () => {
                                 </span>
                             </td>
                             <td class="px-4 py-3.5 align-middle text-right font-mono font-semibold tracking-tight text-sm tabular-nums whitespace-nowrap">
-                                <span v-if="tx.type === 'income'" class="text-emerald-600 dark:text-emerald-500">
-                                    + {{ formatCurrency(parseFloat(tx.amount)) }}
-                                </span>
-                                <span v-else-if="tx.type === 'expense'" class="text-foreground">
-                                    - {{ formatCurrency(parseFloat(tx.amount)) }}
-                                </span>
-                                <span v-else class="text-muted-foreground">
-                                    {{ formatCurrency(parseFloat(tx.amount)) }}
-                                </span>
+                                <div>
+                                    <span v-if="tx.type === 'income'" class="text-emerald-600 dark:text-emerald-500">
+                                        + {{ formatCurrency(parseFloat(tx.amount)) }}
+                                    </span>
+                                    <span v-else-if="tx.type === 'expense'" class="text-foreground">
+                                        - {{ formatCurrency(parseFloat(tx.amount)) }}
+                                    </span>
+                                    <span v-else class="text-muted-foreground">
+                                        {{ formatCurrency(parseFloat(tx.amount)) }}
+                                    </span>
+                                </div>
+                                <div v-if="parseFloat(tx.fee) > 0" class="text-[10px] text-amber-600 dark:text-amber-500 font-semibold mt-0.5">
+                                    + {{ formatCurrency(parseFloat(tx.fee)) }} fee
+                                </div>
+                            </td>
+                            <td class="px-4 py-3.5 align-middle text-right whitespace-nowrap">
+                                <div class="flex items-center justify-end gap-1">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        class="size-8"
+                                        @click="openEditSheet(tx)"
+                                    >
+                                        <Pencil class="size-3.5" />
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        class="size-8 text-destructive hover:text-destructive"
+                                        @click="deleteTransaction(tx)"
+                                    >
+                                        <Trash2 class="size-3.5" />
+                                    </Button>
+                                </div>
                             </td>
                         </tr>
                     </tbody>
@@ -419,22 +502,36 @@ const submitTransaction = () => {
                         </button>
                     </div>
 
-                    <!-- Amount Field -->
-                    <div class="grid gap-2">
-                        <Label for="sheet_amount">Amount (LKR)</Label>
-                        <div class="relative flex items-center">
-                            <span class="absolute left-3 text-sm text-muted-foreground font-semibold text-zinc-500">LKR</span>
+                    <!-- Amount + Fee Row -->
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2 grid gap-2">
+                            <Label for="sheet_amount">Amount (LKR)</Label>
+                            <div class="relative flex items-center">
+                                <span class="absolute left-3 text-sm text-muted-foreground font-semibold text-zinc-500">LKR</span>
+                                <Input 
+                                    id="sheet_amount" 
+                                    type="number" 
+                                    step="0.01" 
+                                    v-model="form.amount" 
+                                    placeholder="0.00"
+                                    class="pl-12 text-sm w-full"
+                                    required 
+                                />
+                            </div>
+                            <div v-if="form.errors.amount" class="text-xs text-red-500">{{ form.errors.amount }}</div>
+                        </div>
+                        <div class="grid gap-2">
+                            <Label for="sheet_fee">Fee</Label>
                             <Input 
-                                id="sheet_amount" 
+                                id="sheet_fee" 
                                 type="number" 
                                 step="0.01" 
-                                v-model="form.amount" 
+                                v-model="form.fee" 
                                 placeholder="0.00"
-                                class="pl-12 text-sm w-full"
-                                required 
+                                class="text-sm"
                             />
+                            <div v-if="form.errors.fee" class="text-xs text-red-500">{{ form.errors.fee }}</div>
                         </div>
-                        <div v-if="form.errors.amount" class="text-xs text-red-500">{{ form.errors.amount }}</div>
                     </div>
 
                     <!-- Conditional Account Dropdowns -->
@@ -541,6 +638,191 @@ const submitTransaction = () => {
                         </Button>
                         <Button type="submit" :disabled="form.processing">
                             {{ form.processing ? 'Saving...' : 'Save Transaction' }}
+                        </Button>
+                    </SheetFooter>
+                </form>
+            </SheetContent>
+        </Sheet>
+
+        <!-- Edit Transaction Slide-over Panel (Sheet) -->
+        <Sheet v-model:open="isEditDialogOpen">
+            <SheetContent side="right" class="w-full sm:max-w-[550px] p-6 sm:p-8 overflow-y-auto space-y-6">
+                <SheetHeader>
+                    <SheetTitle>Edit Transaction</SheetTitle>
+                    <SheetDescription>
+                        Updating this will reverse its original balance effect and reapply the new values.
+                    </SheetDescription>
+                </SheetHeader>
+
+                <form @submit.prevent="submitEditTransaction" class="space-y-5">
+                    <div v-if="editForm.errors.balance" class="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 rounded-lg text-xs font-semibold">
+                        {{ editForm.errors.balance }}
+                    </div>
+
+                    <!-- Type Tabs Toggle -->
+                    <div class="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1 text-center text-sm font-semibold">
+                        <button
+                            type="button"
+                            @click="editForm.type = 'expense'; editForm.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="editForm.type === 'expense' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Expense
+                        </button>
+                        <button
+                            type="button"
+                            @click="editForm.type = 'income'; editForm.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="editForm.type === 'income' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Income
+                        </button>
+                        <button
+                            type="button"
+                            @click="editForm.type = 'transfer'; editForm.category = '';"
+                            class="rounded-md py-2 transition-all duration-200"
+                            :class="editForm.type === 'transfer' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                        >
+                            Transfer
+                        </button>
+                    </div>
+
+                    <!-- Amount + Fee Row -->
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2 grid gap-2">
+                            <Label for="edit_amount">Amount (LKR)</Label>
+                            <div class="relative flex items-center">
+                                <span class="absolute left-3 text-sm text-muted-foreground font-semibold text-zinc-500">LKR</span>
+                                <Input
+                                    id="edit_amount"
+                                    type="number"
+                                    step="0.01"
+                                    v-model="editForm.amount"
+                                    placeholder="0.00"
+                                    class="pl-12 text-sm w-full"
+                                    required
+                                />
+                            </div>
+                            <div v-if="editForm.errors.amount" class="text-xs text-red-500">{{ editForm.errors.amount }}</div>
+                        </div>
+                        <div class="grid gap-2">
+                            <Label for="edit_fee">Fee</Label>
+                            <Input
+                                id="edit_fee"
+                                type="number"
+                                step="0.01"
+                                v-model="editForm.fee"
+                                placeholder="0.00"
+                                class="text-sm"
+                            />
+                            <div v-if="editForm.errors.fee" class="text-xs text-red-500">{{ editForm.errors.fee }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Conditional Account Dropdowns -->
+                    <div v-if="editForm.type !== 'transfer'" class="grid gap-2">
+                        <Label for="edit_account_id">Select Account</Label>
+                        <select
+                            id="edit_account_id"
+                            v-model="editForm.account_id"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none pr-10"
+                            required
+                        >
+                            <option value="">Select Account</option>
+                            <option v-for="acc in accounts" :key="acc.id" :value="acc.id">
+                                {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                            </option>
+                        </select>
+                        <div v-if="editForm.errors.account_id" class="text-xs text-red-500">{{ editForm.errors.account_id }}</div>
+                    </div>
+
+                    <div v-else class="grid grid-cols-2 gap-4">
+                        <div class="grid gap-2">
+                            <Label for="edit_from_account_id">From Account</Label>
+                            <select
+                                id="edit_from_account_id"
+                                v-model="editForm.account_id"
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none pr-10"
+                                required
+                            >
+                                <option value="">Select From</option>
+                                <option v-for="acc in accounts" :key="acc.id" :value="acc.id">
+                                    {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                                </option>
+                            </select>
+                            <div v-if="editForm.errors.account_id" class="text-xs text-red-500">{{ editForm.errors.account_id }}</div>
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="edit_to_account_id">To Account</Label>
+                            <select
+                                id="edit_to_account_id"
+                                v-model="editForm.to_account_id"
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none pr-10"
+                                required
+                            >
+                                <option value="">Select To</option>
+                                <option v-for="acc in accounts" :key="acc.id" :value="acc.id" :disabled="acc.id === editForm.account_id">
+                                    {{ acc.name }} ({{ formatCurrency(parseFloat(acc.balance), acc.currency) }})
+                                </option>
+                            </select>
+                            <div v-if="editForm.errors.to_account_id" class="text-xs text-red-500">{{ editForm.errors.to_account_id }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Category (Income/Expense only, from DB) -->
+                    <div v-if="editForm.type !== 'transfer'" class="grid gap-2">
+                        <Label for="edit_category">Category</Label>
+                        <select
+                            id="edit_category"
+                            v-model="editForm.category"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none pr-10"
+                            required
+                        >
+                            <option value="">Select Category</option>
+                            <option v-for="cat in editableCategories" :key="cat.id" :value="cat.name">
+                                {{ cat.name }}
+                            </option>
+                        </select>
+                        <div v-if="editForm.errors.category" class="text-xs text-red-500">{{ editForm.errors.category }}</div>
+                    </div>
+
+                    <!-- Date -->
+                    <div class="grid gap-2">
+                        <Label for="edit_date">Date</Label>
+                        <Input
+                            id="edit_date"
+                            type="date"
+                            v-model="editForm.date"
+                            class="text-sm"
+                            required
+                        />
+                        <div v-if="editForm.errors.date" class="text-xs text-red-500">{{ editForm.errors.date }}</div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="grid gap-2">
+                        <Label for="edit_description">Description (Optional)</Label>
+                        <textarea
+                            id="edit_description"
+                            v-model="editForm.description"
+                            class="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            placeholder="Describe this transaction..."
+                        ></textarea>
+                        <div v-if="editForm.errors.description" class="text-xs text-red-500">{{ editForm.errors.description }}</div>
+                    </div>
+
+                    <SheetFooter class="pt-4 flex flex-row gap-2 justify-end">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            @click="isEditDialogOpen = false"
+                            :disabled="editForm.processing"
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" :disabled="editForm.processing">
+                            {{ editForm.processing ? 'Saving...' : 'Save Changes' }}
                         </Button>
                     </SheetFooter>
                 </form>

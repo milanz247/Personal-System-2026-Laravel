@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreTransactionRequest;
+use App\Http\Requests\UpdateTransactionRequest;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
@@ -42,79 +43,180 @@ class TransactionController extends Controller
     /**
      * Store a newly created transaction in storage.
      *
-     * Uses a DB::transaction with pessimistic row-level locking (lockForUpdate)
-     * to prevent race conditions where two concurrent requests could both pass
-     * the balance check and overdraw an account.
+     * Real-world financial logic:
+     * - Income: amount goes INTO the account (fee deducted from incoming amount)
+     * - Expense: amount + fee deducted FROM the account
+     * - Transfer: amount goes to destination, but source loses (amount + fee)
+     *
+     * Example: ATM withdrawal of LKR 10,000 with LKR 50 fee
+     *   → Bank account loses LKR 10,050 (amount + fee)
+     *   → Cash wallet receives LKR 10,000 (just the amount)
+     *   → Transaction record shows: amount=10000, fee=50
      */
     public function store(StoreTransactionRequest $request): RedirectResponse
     {
         $validated = $request->validated();
         $amount = (float) $validated['amount'];
+        $fee = (float) ($validated['fee'] ?? 0);
 
-        DB::transaction(function () use ($validated, $amount) {
-            // Pessimistic lock: SELECT ... FOR UPDATE prevents concurrent reads
-            // from seeing stale balances until this transaction commits.
-            $sourceAccount = Account::where('id', $validated['account_id'])
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            // === BALANCE VERIFICATION ===
-            if ($validated['type'] === 'expense' || $validated['type'] === 'transfer') {
-                if ($sourceAccount->type === 'credit_card') {
-                    // Credit card: validate against credit limit ceiling
-                    $sourceAccount->validateExpense($amount);
-                } else {
-                    // Non-credit accounts: strict insufficient funds check
-                    if ((float) $sourceAccount->balance < $amount) {
-                        throw ValidationException::withMessages([
-                            'balance' => ['Insufficient funds in the selected account.'],
-                        ]);
-                    }
-                }
-            }
-
-            // === BUILD TRANSACTION RECORD ===
-            $transaction = new Transaction();
-            $transaction->type = $validated['type'];
-            $transaction->amount = $amount;
-            $transaction->date = $validated['date'];
-            $transaction->description = $validated['description'] ?? null;
-
-            // === BALANCE ADJUSTMENT (Live Math) ===
-            if ($validated['type'] === 'income') {
-                $sourceAccount->balance += $amount;
-                $sourceAccount->save();
-
-                $transaction->account_id = $sourceAccount->id;
-                $transaction->category = $validated['category'];
-            } elseif ($validated['type'] === 'expense') {
-                $sourceAccount->balance -= $amount;
-                $sourceAccount->save();
-
-                $transaction->account_id = $sourceAccount->id;
-                $transaction->category = $validated['category'];
-            } elseif ($validated['type'] === 'transfer') {
-                // Lock destination account row as well to prevent deadlocks
-                $destinationAccount = Account::where('id', $validated['to_account_id'])
-                    ->lockForUpdate()
-                    ->firstOrFail();
-
-                // Debit source
-                $sourceAccount->balance -= $amount;
-                $sourceAccount->save();
-
-                // Credit destination
-                $destinationAccount->balance += $amount;
-                $destinationAccount->save();
-
-                $transaction->account_id = $sourceAccount->id;
-                $transaction->to_account_id = $destinationAccount->id;
-                $transaction->category = null;
-            }
-
+        DB::transaction(function () use ($validated, $amount, $fee) {
+            $transaction = new Transaction;
+            $this->applyTransactionEffect($transaction, $validated, $amount, $fee);
             $transaction->save();
         });
 
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Transaction recorded successfully.'),
+        ]);
+
         return redirect()->back();
+    }
+
+    /**
+     * Update an existing transaction: reverse its original balance effect,
+     * then apply the new values as if it were being created fresh.
+     */
+    public function update(UpdateTransactionRequest $request, Transaction $transaction): RedirectResponse
+    {
+        $validated = $request->validated();
+        $amount = (float) $validated['amount'];
+        $fee = (float) ($validated['fee'] ?? 0);
+
+        DB::transaction(function () use ($transaction, $validated, $amount, $fee) {
+            $this->reverseTransactionEffect($transaction);
+            $this->applyTransactionEffect($transaction, $validated, $amount, $fee);
+            $transaction->save();
+        });
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Transaction updated successfully.'),
+        ]);
+
+        return redirect()->back();
+    }
+
+    /**
+     * Delete a transaction and reverse its balance effect on the affected account(s).
+     */
+    public function destroy(Transaction $transaction): RedirectResponse
+    {
+        DB::transaction(function () use ($transaction) {
+            $this->reverseTransactionEffect($transaction);
+            $transaction->delete();
+        });
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Transaction deleted successfully.'),
+        ]);
+
+        return redirect()->back();
+    }
+
+    /**
+     * Validate and apply a transaction's balance effect on the affected account(s),
+     * populating the given (new or being-edited) Transaction instance in the process.
+     * Locks every account row it touches to prevent concurrent-write races.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function applyTransactionEffect(Transaction $transaction, array $validated, float $amount, float $fee): void
+    {
+        $sourceAccount = Account::where('id', $validated['account_id'])
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        $totalDebit = $amount + $fee;
+
+        if ($validated['type'] === 'expense' || $validated['type'] === 'transfer') {
+            if ($sourceAccount->type === 'credit_card') {
+                $sourceAccount->validateExpense($totalDebit);
+            } elseif ((float) $sourceAccount->balance < $totalDebit) {
+                throw ValidationException::withMessages([
+                    'balance' => ['Insufficient funds. You need '.number_format($totalDebit, 2).' but only have '.number_format((float) $sourceAccount->balance, 2).' available.'],
+                ]);
+            }
+        }
+
+        $transaction->type = $validated['type'];
+        $transaction->amount = $amount;
+        $transaction->fee = $fee;
+        $transaction->date = $validated['date'];
+        $transaction->description = $validated['description'] ?? null;
+
+        if ($validated['type'] === 'income') {
+            // Income: add amount to account, fee is deducted from incoming
+            $netCredit = $amount - $fee;
+            $sourceAccount->balance += $netCredit;
+            $sourceAccount->save();
+
+            $transaction->account_id = $sourceAccount->id;
+            $transaction->to_account_id = null;
+            $transaction->category = $validated['category'];
+        } elseif ($validated['type'] === 'expense') {
+            // Expense: deduct amount + fee from account
+            $sourceAccount->balance -= $totalDebit;
+            $sourceAccount->save();
+
+            $transaction->account_id = $sourceAccount->id;
+            $transaction->to_account_id = null;
+            $transaction->category = $validated['category'];
+        } elseif ($validated['type'] === 'transfer') {
+            $destinationAccount = Account::where('id', $validated['to_account_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Cross-currency transfers would silently create/destroy value since no
+            // exchange rate is captured anywhere in the system yet — block them.
+            if ($destinationAccount->currency !== $sourceAccount->currency) {
+                throw ValidationException::withMessages([
+                    'to_account_id' => ['Transfers between accounts with different currencies are not supported yet.'],
+                ]);
+            }
+
+            // Source loses amount + fee (ATM fee, bank transfer charge, etc.)
+            $sourceAccount->balance -= $totalDebit;
+            $sourceAccount->save();
+
+            // Destination receives only the amount (fee doesn't transfer)
+            $destinationAccount->balance += $amount;
+            $destinationAccount->save();
+
+            $transaction->account_id = $sourceAccount->id;
+            $transaction->to_account_id = $destinationAccount->id;
+            $transaction->category = null;
+        }
+    }
+
+    /**
+     * Undo a persisted transaction's balance effect on the account(s) it originally
+     * touched, using its stored type/amount/fee — the exact inverse of applyTransactionEffect.
+     */
+    private function reverseTransactionEffect(Transaction $transaction): void
+    {
+        $amount = (float) $transaction->amount;
+        $fee = (float) $transaction->fee;
+        $totalDebit = $amount + $fee;
+
+        if ($transaction->type === 'income') {
+            $account = Account::where('id', $transaction->account_id)->lockForUpdate()->firstOrFail();
+            $account->balance -= ($amount - $fee);
+            $account->save();
+        } elseif ($transaction->type === 'expense') {
+            $account = Account::where('id', $transaction->account_id)->lockForUpdate()->firstOrFail();
+            $account->balance += $totalDebit;
+            $account->save();
+        } elseif ($transaction->type === 'transfer') {
+            $source = Account::where('id', $transaction->account_id)->lockForUpdate()->firstOrFail();
+            $destination = Account::where('id', $transaction->to_account_id)->lockForUpdate()->firstOrFail();
+
+            $source->balance += $totalDebit;
+            $source->save();
+
+            $destination->balance -= $amount;
+            $destination->save();
+        }
     }
 }

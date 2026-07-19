@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Account;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,7 +22,7 @@ class DashboardController extends Controller
         // 1. Liquid Cash:
         // Sum of balances of 'bank_account' type PLUS default 'Cash Wallet'.
         $liquidCash = (float) $accounts->filter(function ($account) {
-            return $account->type === 'bank_account' || 
+            return $account->type === 'bank_account' ||
                 ($account->type === 'cash_wallet' && $account->name === 'Cash Wallet');
         })->sum('balance');
 
@@ -57,6 +58,41 @@ class DashboardController extends Controller
             ->limit(5)
             ->get();
 
+        // === CATEGORY-WISE SPENDING BREAKDOWN (this month) ===
+        $startOfMonth = Carbon::now()->startOfMonth();
+        $endOfMonth = Carbon::now()->endOfMonth();
+
+        $categoryBreakdown = Transaction::query()
+            ->where('type', 'expense')
+            ->whereBetween('date', [$startOfMonth, $endOfMonth])
+            ->whereNotNull('category')
+            ->selectRaw('category, SUM(amount) as total, COUNT(*) as count')
+            ->groupBy('category')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($row) => [
+                'category' => $row->category,
+                'total' => (float) $row->total,
+                'count' => (int) $row->count,
+            ])
+            ->values()
+            ->toArray();
+
+        // === MONTHLY TOTALS (this month) ===
+        $monthlyIncome = (float) Transaction::query()
+            ->where('type', 'income')
+            ->whereBetween('date', [$startOfMonth, $endOfMonth])
+            ->sum('amount');
+
+        $monthlyExpenses = (float) Transaction::query()
+            ->where('type', 'expense')
+            ->whereBetween('date', [$startOfMonth, $endOfMonth])
+            ->sum('amount');
+
+        $monthlyFees = (float) Transaction::query()
+            ->whereBetween('date', [$startOfMonth, $endOfMonth])
+            ->sum('fee');
+
         return Inertia::render('Dashboard', [
             'metrics' => [
                 'liquidCash' => $liquidCash,
@@ -65,9 +101,13 @@ class DashboardController extends Controller
                 'totalDebt' => $totalDebt,
                 'totalAssets' => $totalAssets,
                 'netWorth' => $netWorth,
+                'monthlyIncome' => $monthlyIncome,
+                'monthlyExpenses' => $monthlyExpenses,
+                'monthlyFees' => $monthlyFees,
             ],
             'accounts' => $accounts,
             'recentTransactions' => $recentTransactions,
+            'categoryBreakdown' => $categoryBreakdown,
         ]);
     }
 }

@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'type',
     'category',
     'amount',
+    'fee',
     'description',
     'date',
 ])]
@@ -30,6 +31,7 @@ class Transaction extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'fee' => 'decimal:2',
             'date' => 'datetime',
         ];
     }

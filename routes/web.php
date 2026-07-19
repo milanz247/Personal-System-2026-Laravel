@@ -1,12 +1,12 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Auth\RegisterController;
-use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\AccountController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Settings\ProfileController;
+use App\Http\Controllers\TransactionController;
+use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'Welcome')->name('home');
 
@@ -22,6 +22,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('accounts', AccountController::class)->except(['create', 'show', 'edit']);
     Route::post('transactions', [TransactionController::class, 'store'])->name('transactions.store');
     Route::get('transactions', [TransactionController::class, 'index'])->name('transactions.index');
+    Route::put('transactions/{transaction}', [TransactionController::class, 'update'])->name('transactions.update');
+    Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy'])->name('transactions.destroy');
     Route::resource('categories', CategoryController::class)->except(['create', 'show', 'edit']);
 });
 

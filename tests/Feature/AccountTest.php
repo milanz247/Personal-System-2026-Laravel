@@ -2,6 +2,7 @@
 
 use App\Models\Account;
 use App\Models\User;
+use Illuminate\Validation\ValidationException;
 
 test('authenticated user can view accounts dashboard', function () {
     $user = User::factory()->create();
@@ -50,7 +51,7 @@ test('strict data isolation prevents users from viewing other users accounts', f
         ->get(route('accounts.index'));
 
     $response->assertOk();
-    
+
     // Assert that only user1's accounts are passed to Inertia view
     $response->assertInertia(fn ($page) => $page
         ->has('accounts', 1)
@@ -60,21 +61,41 @@ test('strict data isolation prevents users from viewing other users accounts', f
 
 test('authenticated user can update their own account', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'name' => 'Old Wallet Name', 'balance' => 1000]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'name' => 'Old Wallet Name', 'type' => 'bank_account', 'balance' => 1000]);
 
     $response = $this
         ->actingAs($user)
         ->put(route('accounts.update', $account), [
             'name' => 'New Wallet Name',
-            'type' => $account->type,
-            'balance' => 1500,
+            'type' => 'bank_account',
         ]);
 
     $response->assertSessionHasNoErrors();
     $this->assertDatabaseHas('accounts', [
         'id' => $account->id,
         'name' => 'New Wallet Name',
-        'balance' => 1500,
+        // Balance is not editable via this endpoint — only updateBalance() may change
+        // it, so it stays reconcilable against the transaction ledger.
+        'balance' => 1000,
+    ]);
+});
+
+test('updating an account does not accept or change the balance', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'bank_account', 'balance' => 1000]);
+
+    $response = $this
+        ->actingAs($user)
+        ->put(route('accounts.update', $account), [
+            'name' => $account->name,
+            'type' => 'bank_account',
+            'balance' => 999999,
+        ]);
+
+    $response->assertSessionHasNoErrors();
+    $this->assertDatabaseHas('accounts', [
+        'id' => $account->id,
+        'balance' => 1000,
     ]);
 });
 
@@ -157,13 +178,13 @@ test('authenticated user can create a credit card with limit and negative balanc
     ]);
 });
 
-test('authenticated user can update a credit card outstanding debt and credit limit', function () {
+test('authenticated user can update a credit card name and credit limit but not its balance', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create([
         'user_id' => $user->id,
         'type' => 'credit_card',
         'balance' => -20000.00,
-        'credit_limit' => 50000.00
+        'credit_limit' => 50000.00,
     ]);
 
     $response = $this
@@ -171,7 +192,7 @@ test('authenticated user can update a credit card outstanding debt and credit li
         ->put(route('accounts.update', $account), [
             'name' => 'HSBC Premium CC',
             'type' => 'credit_card',
-            'balance' => 45000.00, // updated outstanding debt entered as positive
+            'balance' => 45000.00, // ignored — balance can only change via updateBalance()
             'credit_limit' => 150000.00,
         ]);
 
@@ -179,7 +200,7 @@ test('authenticated user can update a credit card outstanding debt and credit li
     $this->assertDatabaseHas('accounts', [
         'id' => $account->id,
         'name' => 'HSBC Premium CC',
-        'balance' => -45000.00, // updated and stored as negative
+        'balance' => -20000.00, // unchanged
         'credit_limit' => 150000.00,
     ]);
 });
@@ -198,8 +219,8 @@ test('credit card validation prevents transaction exceeding available credit lim
 
     // Expense of 70,000 should be declined
     expect($account->hasAvailableCredit(70000))->toBeFalse();
-    
-    $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+    $this->expectException(ValidationException::class);
     $account->validateExpense(70000); // should throw ValidationException
 });
 
@@ -270,7 +291,7 @@ test('authenticated user can update credit card outstanding debt which automatic
         'user_id' => $user->id,
         'type' => 'credit_card',
         'balance' => -20000.00, // Current Outstanding debt = 20000
-        'credit_limit' => 50000.00
+        'credit_limit' => 50000.00,
     ]);
 
     // Update Outstanding debt to 35000 (meaning balance becomes -35000, decreasing by 15000)
@@ -303,7 +324,7 @@ test('updating credit card balance above credit limit is blocked by validation',
         'user_id' => $user->id,
         'type' => 'credit_card',
         'balance' => -20000.00,
-        'credit_limit' => 50000.00
+        'credit_limit' => 50000.00,
     ]);
 
     // Update Outstanding debt to 60000 (exceeds limit of 50000)
@@ -314,12 +335,10 @@ test('updating credit card balance above credit limit is blocked by validation',
         ]);
 
     $response->assertSessionHasErrors(['balance']);
-    
+
     // Balance should remain unchanged in database
     $this->assertDatabaseHas('accounts', [
         'id' => $account->id,
         'balance' => -20000.00,
     ]);
 });
-
-
