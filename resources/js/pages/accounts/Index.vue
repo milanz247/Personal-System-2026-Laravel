@@ -7,14 +7,24 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { 
-    Dialog, 
-    DialogContent, 
-    DialogHeader, 
-    DialogTitle, 
-    DialogDescription, 
-    DialogFooter 
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter
 } from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from '@/components/ui/alert-dialog';
 import { 
     Select, 
     SelectContent, 
@@ -154,10 +164,22 @@ const submitForm = () => {
 };
 
 // Handle Delete Account
+const isDeleteDialogOpen = ref(false);
+const pendingDeleteAccountId = ref<number | null>(null);
+
 const deleteAccount = (id: number) => {
-    if (confirm('Are you sure you want to delete this account? This action cannot be undone.')) {
-        form.delete(`/accounts/${id}`);
+    pendingDeleteAccountId.value = id;
+    isDeleteDialogOpen.value = true;
+};
+
+const confirmDeleteAccount = () => {
+    if (pendingDeleteAccountId.value === null) {
+        return;
     }
+
+    form.delete(`/accounts/${pendingDeleteAccountId.value}`);
+    isDeleteDialogOpen.value = false;
+    pendingDeleteAccountId.value = null;
 };
 
 // KPI calculations
@@ -681,5 +703,26 @@ const getBadgeLabel = (account: typeof props.accounts[0]) => {
                 </form>
             </DialogContent>
         </Dialog>
+
+        <!-- Delete Account Confirmation -->
+        <AlertDialog v-model:open="isDeleteDialogOpen">
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this account?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        This action cannot be undone. The account and its balance history will be permanently removed.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                        class="bg-destructive text-white hover:bg-destructive/90"
+                        @click="confirmDeleteAccount"
+                    >
+                        Delete
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
     </div>
 </template>

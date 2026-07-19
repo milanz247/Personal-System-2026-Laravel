@@ -14,6 +14,16 @@ import {
     SheetFooter,
 } from '@/components/ui/sheet';
 import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from '@/components/ui/alert-dialog';
+import {
     Plus,
     Trash2,
     Tags,
@@ -92,10 +102,22 @@ const submitCategory = () => {
     });
 };
 
+const isDeleteDialogOpen = ref(false);
+const pendingDeleteCategoryId = ref<number | null>(null);
+
 const deleteCategory = (id: number) => {
-    if (confirm('Are you sure you want to delete this category? This will fail if any transaction still uses it.')) {
-        router.delete(`/categories/${id}`);
+    pendingDeleteCategoryId.value = id;
+    isDeleteDialogOpen.value = true;
+};
+
+const confirmDeleteCategory = () => {
+    if (pendingDeleteCategoryId.value === null) {
+        return;
     }
+
+    router.delete(`/categories/${pendingDeleteCategoryId.value}`);
+    isDeleteDialogOpen.value = false;
+    pendingDeleteCategoryId.value = null;
 };
 
 // Rename (edit) a category
@@ -409,5 +431,26 @@ const submitEditCategory = () => {
                 </form>
             </SheetContent>
         </Sheet>
+
+        <!-- Delete Category Confirmation -->
+        <AlertDialog v-model:open="isDeleteDialogOpen">
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this category?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        This will fail if any transaction still uses it. This action cannot be undone.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                        class="bg-destructive text-white hover:bg-destructive/90"
+                        @click="confirmDeleteCategory"
+                    >
+                        Delete
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
     </div>
 </template>

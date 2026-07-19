@@ -14,6 +14,16 @@ import {
     SheetTitle,
     SheetFooter,
 } from '@/components/ui/sheet';
+import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogCancel,
+    AlertDialogAction,
+} from '@/components/ui/alert-dialog';
 import { 
     Plus,
     Calendar,
@@ -197,19 +207,14 @@ const getCategoryStyle = (category: string | null) => {
 };
 
 const submitTransaction = () => {
+    const selectedType = form.type;
+
     form.post('/transactions', {
         onSuccess: () => {
             isAddDialogOpen.value = false;
-            form.reset({
-                type: form.type,
-                amount: '',
-                fee: '',
-                date: todayStr,
-                account_id: '',
-                to_account_id: '',
-                category: '',
-                description: '',
-            });
+            form.reset();
+            form.type = selectedType;
+            form.date = todayStr;
         },
     });
 };
@@ -262,11 +267,22 @@ const submitEditTransaction = () => {
     });
 };
 
+const isDeleteDialogOpen = ref(false);
+const pendingDeleteTransactionId = ref<number | null>(null);
+
 const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
-    if (!confirm('Delete this transaction? Its balance effect will be reversed on the affected account(s).')) {
+    pendingDeleteTransactionId.value = tx.id;
+    isDeleteDialogOpen.value = true;
+};
+
+const confirmDeleteTransaction = () => {
+    if (pendingDeleteTransactionId.value === null) {
         return;
     }
-    router.delete(`/transactions/${tx.id}`);
+
+    router.delete(`/transactions/${pendingDeleteTransactionId.value}`);
+    isDeleteDialogOpen.value = false;
+    pendingDeleteTransactionId.value = null;
 };
 </script>
 
@@ -864,5 +880,26 @@ const deleteTransaction = (tx: (typeof props.transactions)[number]) => {
                 </form>
             </SheetContent>
         </Sheet>
+
+        <!-- Delete Transaction Confirmation -->
+        <AlertDialog v-model:open="isDeleteDialogOpen">
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this transaction?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Its balance effect will be reversed on the affected account(s). This action cannot be undone.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                        class="bg-destructive text-white hover:bg-destructive/90"
+                        @click="confirmDeleteTransaction"
+                    >
+                        Delete
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
     </div>
 </template>

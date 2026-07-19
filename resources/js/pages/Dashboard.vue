@@ -126,19 +126,14 @@ const availableCategories = computed(() => {
 });
 
 const submitTransaction = () => {
+    const selectedType = form.type;
+
     form.post('/transactions', {
         onSuccess: () => {
             isTransactionDialogOpen.value = false;
-            form.reset({
-                type: form.type,
-                amount: '',
-                fee: '',
-                date: todayStr,
-                account_id: '',
-                to_account_id: '',
-                category: '',
-                description: '',
-            });
+            form.reset();
+            form.type = selectedType;
+            form.date = todayStr;
         },
     });
 };
@@ -230,12 +225,23 @@ const drawPieChart = () => {
     const baseCenterY = displaySize / 2;
     const popOut = 10; // px a popped slice is pushed outward by
 
-    let startAngle = -Math.PI / 2; // Start from top
+    // Slices are separated by a stroke matching the card background, so adjacent
+    // wedges of similar color still read as visually distinct segments.
+    const separatorColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue('--card')
+            .trim() || '#ffffff';
 
-    props.categoryBreakdown.forEach((item, index) => {
-        const sliceAngle = (item.total / totalSpending.value) * 2 * Math.PI;
-        const endAngle = startAngle + sliceAngle;
-        const midAngle = (startAngle + endAngle) / 2;
+    // Precompute each slice's geometry first. Filling and stroking are done in
+    // separate passes below — interleaving them per-slice let each new fill paint
+    // over the previous slice's separator stroke on their shared edge.
+    let startAngle = -Math.PI / 2; // Start from top
+    const slices = props.categoryBreakdown.map((item, index) => {
+        const share = item.total / totalSpending.value;
+        const sliceAngle = share * 2 * Math.PI;
+        const sliceStartAngle = startAngle;
+        const sliceEndAngle = startAngle + sliceAngle;
+        const midAngle = (sliceStartAngle + sliceEndAngle) / 2;
 
         const isHovered = index === hoveredCategoryIndex.value;
         const isPopped = index === largestCategoryIndex.value || isHovered;
@@ -246,24 +252,101 @@ const drawPieChart = () => {
             ? baseCenterY + Math.sin(midAngle) * popOut
             : baseCenterY;
 
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, pieOuterRadius, startAngle, endAngle);
-        ctx.arc(centerX, centerY, pieInnerRadius, endAngle, startAngle, true);
-        ctx.closePath();
-        ctx.fillStyle = pieColors[index % pieColors.length];
+        startAngle = sliceEndAngle;
 
-        if (isPopped) {
-            ctx.shadowColor = isHovered
+        return {
+            index,
+            share,
+            midAngle,
+            startAngle: sliceStartAngle,
+            endAngle: sliceEndAngle,
+            centerX,
+            centerY,
+            isHovered,
+            isPopped,
+        };
+    });
+
+    // Pass 1: fill every slice.
+    slices.forEach((slice) => {
+        ctx.beginPath();
+        ctx.arc(
+            slice.centerX,
+            slice.centerY,
+            pieOuterRadius,
+            slice.startAngle,
+            slice.endAngle,
+        );
+        ctx.arc(
+            slice.centerX,
+            slice.centerY,
+            pieInnerRadius,
+            slice.endAngle,
+            slice.startAngle,
+            true,
+        );
+        ctx.closePath();
+        ctx.fillStyle = pieColors[slice.index % pieColors.length];
+
+        if (slice.isPopped) {
+            ctx.shadowColor = slice.isHovered
                 ? 'rgba(0, 0, 0, 0.35)'
                 : 'rgba(0, 0, 0, 0.25)';
-            ctx.shadowBlur = isHovered ? 12 : 8;
+            ctx.shadowBlur = slice.isHovered ? 12 : 8;
         }
 
         ctx.fill();
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
+    });
 
-        startAngle = endAngle;
+    // Pass 2: stroke every slice's outline, now that no later fill can paint over it.
+    slices.forEach((slice) => {
+        ctx.beginPath();
+        ctx.arc(
+            slice.centerX,
+            slice.centerY,
+            pieOuterRadius,
+            slice.startAngle,
+            slice.endAngle,
+        );
+        ctx.arc(
+            slice.centerX,
+            slice.centerY,
+            pieInnerRadius,
+            slice.endAngle,
+            slice.startAngle,
+            true,
+        );
+        ctx.closePath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = separatorColor;
+        ctx.stroke();
+    });
+
+    // Pass 3: percentage labels for slices with a large enough share.
+    const labelPositions = slices
+        .filter((slice) => slice.share >= 0.08)
+        .map((slice) => {
+            const labelRadius = (pieOuterRadius + pieInnerRadius) / 2;
+
+            return {
+                x: slice.centerX + Math.cos(slice.midAngle) * labelRadius,
+                y: slice.centerY + Math.sin(slice.midAngle) * labelRadius,
+                text: Math.round(slice.share * 100) + '%',
+            };
+        });
+
+    labelPositions.forEach(({ x, y, text }) => {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+        ctx.shadowBlur = 3;
+        ctx.fillText(text, x, y);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
     });
 
     // Center text
@@ -435,6 +518,10 @@ const drawDebtSparkline = () => {
 // === MONTHLY INCOME / EXPENSE TREND (Pure Canvas) ===
 const trendCanvas = ref<HTMLCanvasElement | null>(null);
 
+// Compact "12.3K" / "850" style formatting for axis and bar-top labels.
+const formatCompact = (val: number) =>
+    val >= 1000 ? (val / 1000).toFixed(1) + 'K' : val.toFixed(0);
+
 const drawTrendChart = () => {
     const canvas = trendCanvas.value;
 
@@ -456,23 +543,55 @@ const drawTrendChart = () => {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
+    const mutedColor =
+        getComputedStyle(document.documentElement)
+            .getPropertyValue('--muted-foreground')
+            .trim() || '#71717a';
+
     const maxValue = Math.max(
         ...props.monthlyTrend.map((m) => Math.max(m.income, m.expense)),
         1,
     );
 
+    const leftMargin = 40; // room for y-axis value labels
     const labelHeight = 20;
+    const chartWidth = width - leftMargin;
     const chartHeight = height - labelHeight;
     const baseY = chartHeight - 4;
-    const usableHeight = chartHeight - 12;
+    const topPadding = 16; // room for the value label above the tallest bar
+    const usableHeight = chartHeight - topPadding - 4;
+
+    // Horizontal gridlines with y-axis value labels, so bar heights read as real numbers.
+    const gridSteps = 4;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = '9px Inter, system-ui, sans-serif';
+
+    for (let step = 0; step <= gridSteps; step++) {
+        const fraction = step / gridSteps;
+        const y = baseY - fraction * usableHeight;
+
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width, y);
+        ctx.strokeStyle =
+            step === 0
+                ? 'rgba(113, 113, 122, 0.3)'
+                : 'rgba(113, 113, 122, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = mutedColor;
+        ctx.fillText(formatCompact(maxValue * fraction), leftMargin - 6, y);
+    }
 
     const barCount = props.monthlyTrend.length;
-    const slotWidth = width / barCount;
+    const slotWidth = chartWidth / barCount;
     const barWidth = Math.min(22, slotWidth * 0.28);
     const barGap = 4;
 
     props.monthlyTrend.forEach((m, i) => {
-        const centerX = slotWidth * i + slotWidth / 2;
+        const centerX = leftMargin + slotWidth * i + slotWidth / 2;
         const incomeX = centerX - barGap / 2 - barWidth;
         const expenseX = centerX + barGap / 2;
 
@@ -485,19 +604,31 @@ const drawTrendChart = () => {
         ctx.fillStyle = '#ef4444';
         ctx.fillRect(expenseX, baseY - expenseHeight, barWidth, expenseHeight);
 
-        // Baseline tick under each month's bar pair
-        ctx.beginPath();
-        ctx.moveTo(incomeX, baseY);
-        ctx.lineTo(expenseX + barWidth, baseY);
-        ctx.strokeStyle = 'rgba(113, 113, 122, 0.25)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        // Value labels above each bar so exact figures are readable at a glance.
+        ctx.font = '9px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+
+        if (m.income > 0) {
+            ctx.fillStyle = '#22c55e';
+            ctx.fillText(
+                formatCompact(m.income),
+                incomeX + barWidth / 2,
+                baseY - incomeHeight - 2,
+            );
+        }
+
+        if (m.expense > 0) {
+            ctx.fillStyle = '#ef4444';
+            ctx.fillText(
+                formatCompact(m.expense),
+                expenseX + barWidth / 2,
+                baseY - expenseHeight - 2,
+            );
+        }
 
         // Month label
-        ctx.fillStyle =
-            getComputedStyle(document.documentElement)
-                .getPropertyValue('--muted-foreground')
-                .trim() || '#71717a';
+        ctx.fillStyle = mutedColor;
         ctx.font = '10px Inter, system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
@@ -651,7 +782,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                         <TrendingUp class="h-5 w-5" />
                     </div>
                     <CardTitle
-                        class="text-base font-bold tracking-tight text-foreground"
+                        class="text-sm font-bold tracking-tight text-foreground"
                     >
                         Net Worth
                     </CardTitle>
@@ -676,7 +807,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                     >
                         <div class="flex flex-col items-center gap-1 px-1">
                             <span
-                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                                class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"
                             >
                                 <span
                                     class="size-2 rounded-full bg-emerald-500"
@@ -684,7 +815,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 Liquid Cash
                             </span>
                             <span
-                                class="text-sm font-semibold text-foreground tabular-nums"
+                                class="text-lg font-semibold text-foreground tabular-nums"
                             >
                                 {{
                                     formatCurrency(
@@ -696,7 +827,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                         </div>
                         <div class="flex flex-col items-center gap-1 px-1">
                             <span
-                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                                class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"
                             >
                                 <span
                                     class="size-2 rounded-full bg-violet-500"
@@ -704,7 +835,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 Cash in Hand
                             </span>
                             <span
-                                class="text-sm font-semibold text-foreground tabular-nums"
+                                class="text-lg font-semibold text-foreground tabular-nums"
                             >
                                 {{
                                     formatCurrency(
@@ -716,7 +847,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                         </div>
                         <div class="flex flex-col items-center gap-1 px-1">
                             <span
-                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                                class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"
                             >
                                 <span
                                     class="size-2 rounded-full bg-red-500"
@@ -724,7 +855,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 Total Debt
                             </span>
                             <span
-                                class="text-sm font-semibold text-red-600 tabular-nums dark:text-red-400"
+                                class="text-lg font-semibold text-red-600 tabular-nums dark:text-red-400"
                             >
                                 −
                                 {{
@@ -895,7 +1026,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                             class="mt-4 flex items-center gap-4 border-t border-border pt-3"
                         >
                             <span
-                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                                class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"
                             >
                                 <span
                                     class="size-2.5 rounded-full bg-emerald-500"
@@ -903,7 +1034,7 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 Income
                             </span>
                             <span
-                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                                class="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"
                             >
                                 <span
                                     class="size-2.5 rounded-full bg-red-500"
