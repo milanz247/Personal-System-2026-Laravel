@@ -366,7 +366,7 @@ const submitTransaction = () => {
 
         <!-- Right Side Slide-over Panel (Sheet) -->
         <Sheet v-model:open="isAddDialogOpen">
-            <SheetContent side="right" class="w-full sm:max-w-[450px] overflow-y-auto space-y-6">
+            <SheetContent side="right" class="w-full sm:max-w-[550px] p-6 sm:p-8 overflow-y-auto space-y-6">
                 <SheetHeader>
                     <SheetTitle>New Transaction</SheetTitle>
                     <SheetDescription>
@@ -412,14 +412,14 @@ const submitTransaction = () => {
                     <div class="grid gap-2">
                         <Label for="sheet_amount">Amount (LKR)</Label>
                         <div class="relative flex items-center">
-                            <span class="absolute left-3 text-sm text-muted-foreground font-semibold">LKR</span>
+                            <span class="absolute left-3 text-sm text-muted-foreground font-semibold text-zinc-500">LKR</span>
                             <Input 
                                 id="sheet_amount" 
                                 type="number" 
                                 step="0.01" 
                                 v-model="form.amount" 
                                 placeholder="0.00"
-                                class="pl-12 text-sm"
+                                class="pl-12 text-sm w-full"
                                 required 
                             />
                         </div>
@@ -432,7 +432,7 @@ const submitTransaction = () => {
                         <select 
                             id="sheet_account_id"
                             v-model="form.account_id" 
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22M6_8l4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_0.75rem_center] bg-[size:1.25rem] bg-no-repeat pr-10"
                             required
                         >
                             <option value="">Select Account</option>
@@ -449,7 +449,7 @@ const submitTransaction = () => {
                             <select 
                                 id="sheet_from_account_id"
                                 v-model="form.account_id" 
-                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22M6_8l4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_0.75rem_center] bg-[size:1.25rem] bg-no-repeat pr-10"
                                 required
                             >
                                 <option value="">Select From</option>
@@ -465,7 +465,7 @@ const submitTransaction = () => {
                             <select 
                                 id="sheet_to_account_id"
                                 v-model="form.to_account_id" 
-                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22M6_8l4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_0.75rem_center] bg-[size:1.25rem] bg-no-repeat pr-10"
                                 required
                             >
                                 <option value="">Select To</option>
@@ -483,7 +483,7 @@ const submitTransaction = () => {
                         <select 
                             id="sheet_category"
                             v-model="form.category" 
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22M6_8l4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_0.75rem_center] bg-[size:1.25rem] bg-no-repeat pr-10"
                             required
                         >
                             <option value="">Select Category</option>
