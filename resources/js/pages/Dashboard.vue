@@ -3,9 +3,6 @@ import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import {
     TrendingUp,
     TrendingDown,
-    Wallet,
-    Banknote,
-    CreditCard,
     Plus,
     ArrowDownLeft,
     ArrowUpRight,
@@ -84,8 +81,6 @@ const props = defineProps<{
         month: string;
         income: number;
         expense: number;
-        incomeByCategory: Record<string, number>;
-        expenseByCategory: Record<string, number>;
     }>;
 }>();
 
@@ -189,6 +184,27 @@ const largestCategoryIndex = computed(() => {
     return maxIndex;
 });
 
+// Slice currently under the cursor, popped out and highlighted on hover.
+const hoveredCategoryIndex = ref<number | null>(null);
+const pieTooltip = ref<{
+    visible: boolean;
+    x: number;
+    y: number;
+    category: string;
+    amount: number;
+    percent: number;
+}>({
+    visible: false,
+    x: 0,
+    y: 0,
+    category: '',
+    amount: 0,
+    percent: 0,
+});
+
+const pieOuterRadius = 100;
+const pieInnerRadius = 60; // Donut hole
+
 const drawPieChart = () => {
     const canvas = pieCanvas.value;
 
@@ -212,9 +228,7 @@ const drawPieChart = () => {
 
     const baseCenterX = displaySize / 2;
     const baseCenterY = displaySize / 2;
-    const outerRadius = 100;
-    const innerRadius = 60; // Donut hole
-    const popOut = 10; // px the largest slice is pushed outward by
+    const popOut = 10; // px a popped slice is pushed outward by
 
     let startAngle = -Math.PI / 2; // Start from top
 
@@ -223,23 +237,26 @@ const drawPieChart = () => {
         const endAngle = startAngle + sliceAngle;
         const midAngle = (startAngle + endAngle) / 2;
 
-        const isLargest = index === largestCategoryIndex.value;
-        const centerX = isLargest
+        const isHovered = index === hoveredCategoryIndex.value;
+        const isPopped = index === largestCategoryIndex.value || isHovered;
+        const centerX = isPopped
             ? baseCenterX + Math.cos(midAngle) * popOut
             : baseCenterX;
-        const centerY = isLargest
+        const centerY = isPopped
             ? baseCenterY + Math.sin(midAngle) * popOut
             : baseCenterY;
 
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
-        ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
+        ctx.arc(centerX, centerY, pieOuterRadius, startAngle, endAngle);
+        ctx.arc(centerX, centerY, pieInnerRadius, endAngle, startAngle, true);
         ctx.closePath();
         ctx.fillStyle = pieColors[index % pieColors.length];
 
-        if (isLargest) {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
-            ctx.shadowBlur = 8;
+        if (isPopped) {
+            ctx.shadowColor = isHovered
+                ? 'rgba(0, 0, 0, 0.35)'
+                : 'rgba(0, 0, 0, 0.25)';
+            ctx.shadowBlur = isHovered ? 12 : 8;
         }
 
         ctx.fill();
@@ -267,6 +284,92 @@ const drawPieChart = () => {
     ctx.font = '11px Inter, system-ui, sans-serif';
     ctx.fillStyle = '#71717a';
     ctx.fillText('This Month', baseCenterX, baseCenterY + 12);
+};
+
+// Determines which slice (if any) the cursor is over and updates the hover tooltip.
+const handlePieMouseMove = (event: MouseEvent) => {
+    const canvas = pieCanvas.value;
+
+    if (!canvas || props.categoryBreakdown.length === 0) {
+        return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / 220;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const dx = x - rect.width / 2;
+    const dy = y - rect.height / 2;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (
+        dist < pieInnerRadius * scale ||
+        dist > pieOuterRadius * scale ||
+        totalSpending.value <= 0
+    ) {
+        handlePieMouseLeave();
+
+        return;
+    }
+
+    let angle = Math.atan2(dy, dx) + Math.PI / 2;
+
+    if (angle < 0) {
+        angle += 2 * Math.PI;
+    }
+
+    let cumulative = 0;
+    let foundIndex = -1;
+
+    for (let i = 0; i < props.categoryBreakdown.length; i++) {
+        const sliceAngle =
+            (props.categoryBreakdown[i].total / totalSpending.value) *
+            2 *
+            Math.PI;
+
+        if (angle >= cumulative && angle < cumulative + sliceAngle) {
+            foundIndex = i;
+            break;
+        }
+
+        cumulative += sliceAngle;
+    }
+
+    if (foundIndex === -1) {
+        handlePieMouseLeave();
+
+        return;
+    }
+
+    if (hoveredCategoryIndex.value !== foundIndex) {
+        hoveredCategoryIndex.value = foundIndex;
+        drawPieChart();
+    }
+
+    const item = props.categoryBreakdown[foundIndex];
+    pieTooltip.value = {
+        visible: true,
+        x,
+        y,
+        category: item.category,
+        amount: item.total,
+        percent: (item.total / totalSpending.value) * 100,
+    };
+};
+
+const handlePieMouseLeave = () => {
+    if (hoveredCategoryIndex.value !== null) {
+        hoveredCategoryIndex.value = null;
+        drawPieChart();
+    }
+
+    pieTooltip.value.visible = false;
+};
+
+// Mirrors the slice pop-out when the cursor is over a legend row instead of the donut itself.
+const handleLegendHover = (index: number) => {
+    hoveredCategoryIndex.value = index;
+    drawPieChart();
 };
 
 // === TOTAL DEBT SPARKLINE (Pure Canvas) ===
@@ -329,32 +432,8 @@ const drawDebtSparkline = () => {
     ctx.fill();
 };
 
-// === MONTHLY INCOME / EXPENSE BY CATEGORY (Diverging Stacked Bar, Pure Canvas) ===
+// === MONTHLY INCOME / EXPENSE TREND (Pure Canvas) ===
 const trendCanvas = ref<HTMLCanvasElement | null>(null);
-
-// Consistent color per category name, shared across the pie chart and this trend chart.
-const trendCategoryOrder = computed(() => {
-    const seen: string[] = [];
-    props.monthlyTrend.forEach((m) => {
-        Object.keys(m.incomeByCategory).forEach((c) => {
-            if (!seen.includes(c)) {
-                seen.push(c);
-            }
-        });
-        Object.keys(m.expenseByCategory).forEach((c) => {
-            if (!seen.includes(c)) {
-                seen.push(c);
-            }
-        });
-    });
-
-    return seen;
-});
-const trendCategoryColor = (category: string) => {
-    const index = trendCategoryOrder.value.indexOf(category);
-
-    return pieColors[index >= 0 ? index % pieColors.length : 0];
-};
 
 const drawTrendChart = () => {
     const canvas = trendCanvas.value;
@@ -384,44 +463,35 @@ const drawTrendChart = () => {
 
     const labelHeight = 20;
     const chartHeight = height - labelHeight;
-    const zeroY = chartHeight / 2;
-    const usableHalf = zeroY - 8;
+    const baseY = chartHeight - 4;
+    const usableHeight = chartHeight - 12;
 
     const barCount = props.monthlyTrend.length;
     const slotWidth = width / barCount;
-    const barWidth = Math.min(36, slotWidth * 0.5);
-
-    // Zero axis line
-    ctx.beginPath();
-    ctx.moveTo(0, zeroY);
-    ctx.lineTo(width, zeroY);
-    ctx.strokeStyle = 'rgba(113, 113, 122, 0.25)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    const barWidth = Math.min(22, slotWidth * 0.28);
+    const barGap = 4;
 
     props.monthlyTrend.forEach((m, i) => {
         const centerX = slotWidth * i + slotWidth / 2;
-        const barX = centerX - barWidth / 2;
+        const incomeX = centerX - barGap / 2 - barWidth;
+        const expenseX = centerX + barGap / 2;
 
-        // Income segments stack upward from the zero line
-        let cursorY = zeroY;
-        Object.entries(m.incomeByCategory).forEach(([category, amount]) => {
-            const segHeight = (amount / maxValue) * usableHalf;
-            ctx.fillStyle = trendCategoryColor(category);
-            ctx.fillRect(barX, cursorY - segHeight, barWidth, segHeight);
-            cursorY -= segHeight;
-        });
+        const incomeHeight = (m.income / maxValue) * usableHeight;
+        const expenseHeight = (m.expense / maxValue) * usableHeight;
 
-        // Expense segments stack downward from the zero line
-        cursorY = zeroY;
-        Object.entries(m.expenseByCategory).forEach(([category, amount]) => {
-            const segHeight = (amount / maxValue) * usableHalf;
-            ctx.fillStyle = trendCategoryColor(category);
-            ctx.globalAlpha = 0.65;
-            ctx.fillRect(barX, cursorY, barWidth, segHeight);
-            ctx.globalAlpha = 1;
-            cursorY += segHeight;
-        });
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(incomeX, baseY - incomeHeight, barWidth, incomeHeight);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(expenseX, baseY - expenseHeight, barWidth, expenseHeight);
+
+        // Baseline tick under each month's bar pair
+        ctx.beginPath();
+        ctx.moveTo(incomeX, baseY);
+        ctx.lineTo(expenseX + barWidth, baseY);
+        ctx.strokeStyle = 'rgba(113, 113, 122, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
 
         // Month label
         ctx.fillStyle =
@@ -495,188 +565,35 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
             yet.
         </div>
 
-        <!-- Net Worth Hero Card -->
-        <Card
-            class="relative overflow-hidden border-l-4 border-l-primary bg-gradient-to-br from-primary/5 to-transparent transition duration-200 hover:shadow-sm"
-        >
-            <CardContent
-                class="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-                <div class="flex items-center gap-4">
-                    <div
-                        class="shrink-0 rounded-xl bg-primary/10 p-3 text-primary"
-                    >
-                        <TrendingUp class="h-6 w-6" />
-                    </div>
-                    <div class="space-y-0.5">
-                        <p
-                            class="text-sm font-semibold tracking-tight text-foreground"
-                        >
-                            Net Worth
-                        </p>
-                        <p class="text-xs font-medium text-muted-foreground">
-                            Total Assets − Total Liabilities
-                        </p>
-                    </div>
-                </div>
-                <div
-                    class="text-3xl font-bold tracking-tight text-foreground tabular-nums sm:text-4xl"
-                >
-                    {{
-                        formatCurrency(
-                            metrics.netWorth,
-                            metrics.primaryCurrency,
-                        )
-                    }}
-                </div>
-            </CardContent>
-        </Card>
-
-        <!-- Supporting 3-Card Grid -->
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <!-- Liquid Cash -->
+        <!-- Top Row: Income/Expenses (combined), Net Worth -->
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <!-- Income + Expenses (split card, centered) -->
             <Card
-                class="border-l-4 border-l-emerald-500 transition duration-200 hover:shadow-sm"
+                class="gap-0 overflow-hidden py-0 transition duration-200 hover:shadow-sm"
             >
-                <CardHeader
-                    class="flex flex-row items-start justify-between space-y-0 pb-2"
-                >
-                    <div class="space-y-0.5">
-                        <CardTitle
-                            class="text-sm font-semibold tracking-tight text-foreground"
-                        >
-                            Liquid Cash
-                        </CardTitle>
-                        <p class="text-xs font-medium text-muted-foreground">
-                            Bank Accounts + Cash Wallet
-                        </p>
-                    </div>
+                <div class="grid h-full grid-cols-2 divide-x divide-border">
                     <div
-                        class="shrink-0 rounded-lg bg-emerald-500/10 p-2 text-emerald-500 dark:text-emerald-400"
+                        class="flex flex-col items-center justify-center gap-2 bg-emerald-500/5 p-6 text-center dark:bg-emerald-500/10"
                     >
-                        <Wallet class="h-4 w-4" />
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div
-                        class="text-2xl font-bold tracking-tight text-foreground tabular-nums"
-                    >
-                        {{
-                            formatCurrency(
-                                metrics.liquidCash,
-                                metrics.primaryCurrency,
-                            )
-                        }}
-                    </div>
-                </CardContent>
-            </Card>
-
-            <!-- Cash in Hand -->
-            <Card
-                class="border-l-4 border-l-violet-500 transition duration-200 hover:shadow-sm"
-            >
-                <CardHeader
-                    class="flex flex-row items-start justify-between space-y-0 pb-2"
-                >
-                    <div class="space-y-0.5">
-                        <CardTitle
-                            class="text-sm font-semibold tracking-tight text-foreground"
-                        >
-                            Cash in Hand
-                        </CardTitle>
-                        <p class="text-xs font-medium text-muted-foreground">
-                            Cash Wallet
-                        </p>
-                    </div>
-                    <div
-                        class="shrink-0 rounded-lg bg-violet-500/10 p-2 text-violet-500 dark:text-violet-400"
-                    >
-                        <Banknote class="h-4 w-4" />
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div
-                        class="text-2xl font-bold tracking-tight text-foreground tabular-nums"
-                    >
-                        {{
-                            formatCurrency(
-                                metrics.cashInHand,
-                                metrics.primaryCurrency,
-                            )
-                        }}
-                    </div>
-                </CardContent>
-            </Card>
-
-            <!-- Total Debt -->
-            <Card
-                class="border-l-4 border-red-200 border-l-red-500 bg-red-50/50 transition duration-200 hover:shadow-sm dark:border-red-900/50 dark:bg-red-950/10"
-            >
-                <CardHeader
-                    class="flex flex-row items-start justify-between space-y-0 pb-2"
-                >
-                    <div class="space-y-0.5">
-                        <CardTitle
-                            class="text-sm font-semibold tracking-tight text-red-950 dark:text-red-400"
-                        >
-                            Total Debt
-                        </CardTitle>
-                        <p
-                            class="text-xs font-medium text-red-900/60 dark:text-red-400/60"
-                        >
-                            Credit Card Liabilities
-                        </p>
-                    </div>
-                    <div
-                        class="shrink-0 rounded-lg bg-red-500/10 p-2 text-red-500 dark:text-red-400"
-                    >
-                        <CreditCard class="h-4 w-4" />
-                    </div>
-                </CardHeader>
-                <CardContent class="flex items-center justify-between gap-3">
-                    <div
-                        class="text-2xl font-bold tracking-tight text-red-600 tabular-nums dark:text-red-400"
-                    >
-                        {{
-                            formatCurrency(
-                                metrics.totalDebt,
-                                metrics.primaryCurrency,
-                            )
-                        }}
-                    </div>
-                    <canvas
-                        v-if="debtTrend.length > 1"
-                        ref="debtSparklineCanvas"
-                        class="h-8 w-24 shrink-0"
-                    ></canvas>
-                </CardContent>
-            </Card>
-        </div>
-
-        <!-- Monthly Flow + Category Pie Chart Row -->
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <!-- Monthly Flow Summary Cards (2 small cards stacked) -->
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
-                <!-- Monthly Income -->
-                <Card
-                    class="border-l-4 border-l-emerald-500 transition duration-200 hover:shadow-sm"
-                >
-                    <CardHeader
-                        class="flex flex-row items-center justify-between space-y-0 px-5 pt-4 pb-1"
-                    >
-                        <CardTitle
-                            class="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-                            >Income this month</CardTitle
-                        >
                         <div
-                            class="rounded-md bg-emerald-500/10 p-1.5 text-emerald-500"
+                            class="rounded-full bg-emerald-500/10 p-3 text-emerald-500"
                         >
-                            <ArrowDownLeft class="size-3.5" />
+                            <ArrowDownLeft class="h-6 w-6" />
                         </div>
-                    </CardHeader>
-                    <CardContent class="px-5 pb-4">
+                        <div>
+                            <p
+                                class="text-sm font-semibold tracking-tight text-foreground"
+                            >
+                                Income
+                            </p>
+                            <p
+                                class="text-xs font-medium text-muted-foreground"
+                            >
+                                This month
+                            </p>
+                        </div>
                         <div
-                            class="text-xl font-bold tracking-tight text-emerald-600 tabular-nums dark:text-emerald-500"
+                            class="text-2xl font-bold tracking-tight text-emerald-600 tabular-nums dark:text-emerald-500"
                         >
                             +
                             {{
@@ -686,29 +603,30 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 )
                             }}
                         </div>
-                    </CardContent>
-                </Card>
+                    </div>
 
-                <!-- Monthly Expenses -->
-                <Card
-                    class="border-l-4 border-l-red-500 transition duration-200 hover:shadow-sm"
-                >
-                    <CardHeader
-                        class="flex flex-row items-center justify-between space-y-0 px-5 pt-4 pb-1"
+                    <div
+                        class="flex flex-col items-center justify-center gap-2 bg-red-500/5 p-6 text-center dark:bg-red-500/10"
                     >
-                        <CardTitle
-                            class="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-                            >Expenses this month</CardTitle
-                        >
                         <div
-                            class="rounded-md bg-red-500/10 p-1.5 text-red-500"
+                            class="rounded-full bg-red-500/10 p-3 text-red-500"
                         >
-                            <ArrowUpRight class="size-3.5" />
+                            <ArrowUpRight class="h-6 w-6" />
                         </div>
-                    </CardHeader>
-                    <CardContent class="px-5 pb-4">
+                        <div>
+                            <p
+                                class="text-sm font-semibold tracking-tight text-foreground"
+                            >
+                                Expenses
+                            </p>
+                            <p
+                                class="text-xs font-medium text-muted-foreground"
+                            >
+                                This month
+                            </p>
+                        </div>
                         <div
-                            class="text-xl font-bold tracking-tight text-red-600 tabular-nums dark:text-red-500"
+                            class="text-2xl font-bold tracking-tight text-red-600 tabular-nums dark:text-red-500"
                         >
                             -
                             {{
@@ -718,12 +636,119 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 )
                             }}
                         </div>
-                    </CardContent>
-                </Card>
-            </div>
+                    </div>
+                </div>
+            </Card>
 
+            <!-- Net Worth (with Liquid Cash / Cash in Hand / Total Debt breakdown, centered) -->
+            <Card
+                class="gap-3 border-l-4 border-l-primary/30 py-4 text-center transition duration-200 hover:shadow-sm"
+            >
+                <CardHeader class="flex flex-col items-center space-y-0 px-4">
+                    <div
+                        class="mb-1 rounded-full bg-primary/10 p-2.5 text-primary"
+                    >
+                        <TrendingUp class="h-5 w-5" />
+                    </div>
+                    <CardTitle
+                        class="text-base font-bold tracking-tight text-foreground"
+                    >
+                        Net Worth
+                    </CardTitle>
+                    <p class="text-xs font-medium text-muted-foreground">
+                        Total Assets − Total Liabilities
+                    </p>
+                </CardHeader>
+                <CardContent class="px-4">
+                    <div
+                        class="text-3xl font-bold tracking-tight text-foreground tabular-nums"
+                    >
+                        {{
+                            formatCurrency(
+                                metrics.netWorth,
+                                metrics.primaryCurrency,
+                            )
+                        }}
+                    </div>
+
+                    <div
+                        class="mt-3 grid grid-cols-3 divide-x divide-border border-t border-border pt-3"
+                    >
+                        <div class="flex flex-col items-center gap-1 px-1">
+                            <span
+                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                            >
+                                <span
+                                    class="size-2 rounded-full bg-emerald-500"
+                                ></span>
+                                Liquid Cash
+                            </span>
+                            <span
+                                class="text-sm font-semibold text-foreground tabular-nums"
+                            >
+                                {{
+                                    formatCurrency(
+                                        metrics.liquidCash,
+                                        metrics.primaryCurrency,
+                                    )
+                                }}
+                            </span>
+                        </div>
+                        <div class="flex flex-col items-center gap-1 px-1">
+                            <span
+                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                            >
+                                <span
+                                    class="size-2 rounded-full bg-violet-500"
+                                ></span>
+                                Cash in Hand
+                            </span>
+                            <span
+                                class="text-sm font-semibold text-foreground tabular-nums"
+                            >
+                                {{
+                                    formatCurrency(
+                                        metrics.cashInHand,
+                                        metrics.primaryCurrency,
+                                    )
+                                }}
+                            </span>
+                        </div>
+                        <div class="flex flex-col items-center gap-1 px-1">
+                            <span
+                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                            >
+                                <span
+                                    class="size-2 rounded-full bg-red-500"
+                                ></span>
+                                Total Debt
+                            </span>
+                            <span
+                                class="text-sm font-semibold text-red-600 tabular-nums dark:text-red-400"
+                            >
+                                −
+                                {{
+                                    formatCurrency(
+                                        metrics.totalDebt,
+                                        metrics.primaryCurrency,
+                                    )
+                                }}
+                            </span>
+                        </div>
+                    </div>
+                    <canvas
+                        v-if="debtTrend.length > 1"
+                        ref="debtSparklineCanvas"
+                        class="mt-3 h-5 w-full"
+                    ></canvas>
+                </CardContent>
+            </Card>
+        </div>
+
+        <!-- Charts Row: Spending by Category + Income vs Expenses -->
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <!-- Category Pie Chart -->
-            <Card class="transition duration-200 hover:shadow-sm lg:col-span-2">
+            <Card class="transition duration-200 hover:shadow-sm">
                 <CardHeader class="pb-2">
                     <CardTitle
                         class="text-sm font-semibold tracking-tight text-foreground"
@@ -740,12 +765,36 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                         class="flex flex-col items-center gap-6 sm:flex-row"
                     >
                         <!-- Donut Chart -->
-                        <div class="shrink-0">
+                        <div class="relative shrink-0">
                             <canvas
                                 ref="pieCanvas"
                                 width="220"
                                 height="220"
+                                class="cursor-pointer"
+                                @mousemove="handlePieMouseMove"
+                                @mouseleave="handlePieMouseLeave"
                             ></canvas>
+
+                            <!-- Hover Tooltip -->
+                            <div
+                                v-if="pieTooltip.visible"
+                                class="pointer-events-none absolute z-10 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs whitespace-nowrap shadow-md transition-opacity duration-150"
+                                :style="{
+                                    left: pieTooltip.x + 'px',
+                                    top: pieTooltip.y + 'px',
+                                    transform: 'translate(-50%, -125%)',
+                                }"
+                            >
+                                <p
+                                    class="font-semibold text-popover-foreground"
+                                >
+                                    {{ pieTooltip.category }}
+                                </p>
+                                <p class="text-muted-foreground tabular-nums">
+                                    {{ formatCurrency(pieTooltip.amount) }} ·
+                                    {{ pieTooltip.percent.toFixed(1) }}%
+                                </p>
+                            </div>
                         </div>
 
                         <!-- Legend & Breakdown -->
@@ -756,6 +805,8 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                                 v-for="(item, index) in categoryBreakdown"
                                 :key="item.category"
                                 class="flex items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-muted/50"
+                                @mouseenter="handleLegendHover(index)"
+                                @mouseleave="handlePieMouseLeave"
                             >
                                 <div class="flex min-w-0 items-center gap-2.5">
                                     <span
@@ -816,87 +867,72 @@ const currentMonth = new Date().toLocaleDateString('en-US', {
                     </div>
                 </CardContent>
             </Card>
+
+            <!-- Monthly Income vs Expense Trend -->
+            <Card class="transition duration-200 hover:shadow-sm">
+                <CardHeader class="pb-2">
+                    <CardTitle
+                        class="text-sm font-semibold tracking-tight text-foreground"
+                    >
+                        Income vs Expenses
+                    </CardTitle>
+                    <p class="text-xs font-medium text-muted-foreground">
+                        Last 6 months
+                    </p>
+                </CardHeader>
+                <CardContent>
+                    <div
+                        v-if="
+                            monthlyTrend.some(
+                                (m) => m.income > 0 || m.expense > 0,
+                            )
+                        "
+                    >
+                        <canvas ref="trendCanvas" class="h-56 w-full"></canvas>
+
+                        <!-- Legend -->
+                        <div
+                            class="mt-4 flex items-center gap-4 border-t border-border pt-3"
+                        >
+                            <span
+                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                            >
+                                <span
+                                    class="size-2.5 rounded-full bg-emerald-500"
+                                ></span>
+                                Income
+                            </span>
+                            <span
+                                class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                            >
+                                <span
+                                    class="size-2.5 rounded-full bg-red-500"
+                                ></span>
+                                Expenses
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div
+                        v-else
+                        class="flex flex-col items-center justify-center py-10 text-center"
+                    >
+                        <div
+                            class="mb-3 rounded-full bg-muted p-3 text-muted-foreground"
+                        >
+                            <TrendingUp class="size-6" />
+                        </div>
+                        <p class="text-sm font-medium text-muted-foreground">
+                            No income or expense history yet.
+                        </p>
+                        <p class="mt-0.5 text-xs text-muted-foreground">
+                            Add transactions over time to see monthly trends.
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
         </div>
-
-        <!-- Monthly Income vs Expense Trend (Diverging Stacked Bar by Category) -->
-        <Card class="transition duration-200 hover:shadow-sm">
-            <CardHeader class="pb-2">
-                <CardTitle
-                    class="text-sm font-semibold tracking-tight text-foreground"
-                >
-                    Income vs Expenses by Category
-                </CardTitle>
-                <p class="text-xs font-medium text-muted-foreground">
-                    Last 6 months
-                </p>
-            </CardHeader>
-            <CardContent>
-                <div
-                    v-if="
-                        monthlyTrend.some((m) => m.income > 0 || m.expense > 0)
-                    "
-                >
-                    <canvas ref="trendCanvas" class="h-56 w-full"></canvas>
-
-                    <!-- Legend -->
-                    <div
-                        class="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3"
-                    >
-                        <div
-                            v-for="category in trendCategoryOrder"
-                            :key="category"
-                            class="flex items-center gap-1.5"
-                        >
-                            <span
-                                class="size-2.5 shrink-0 rounded-full"
-                                :style="{
-                                    backgroundColor:
-                                        trendCategoryColor(category),
-                                }"
-                            ></span>
-                            <span
-                                class="text-xs font-medium text-muted-foreground"
-                                >{{ category }}</span
-                            >
-                        </div>
-                        <div
-                            class="ml-auto flex items-center gap-3 text-[10px] font-medium text-muted-foreground"
-                        >
-                            <span class="flex items-center gap-1"
-                                ><span
-                                    class="size-2.5 rounded-full bg-zinc-400"
-                                ></span
-                                >Income (above)</span
-                            >
-                            <span class="flex items-center gap-1"
-                                ><span
-                                    class="size-2.5 rounded-full bg-zinc-400 opacity-65"
-                                ></span
-                                >Expense (below)</span
-                            >
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Empty State -->
-                <div
-                    v-else
-                    class="flex flex-col items-center justify-center py-10 text-center"
-                >
-                    <div
-                        class="mb-3 rounded-full bg-muted p-3 text-muted-foreground"
-                    >
-                        <TrendingUp class="size-6" />
-                    </div>
-                    <p class="text-sm font-medium text-muted-foreground">
-                        No income or expense history yet.
-                    </p>
-                    <p class="mt-0.5 text-xs text-muted-foreground">
-                        Add transactions over time to see monthly trends.
-                    </p>
-                </div>
-            </CardContent>
-        </Card>
 
         <!-- Recent Transactions -->
         <Card class="transition duration-200 hover:shadow-sm">
