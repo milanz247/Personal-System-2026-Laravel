@@ -40,6 +40,13 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $request->user(),
+                'categories' => $request->user()
+                    ? \App\Models\Category::query()
+                        ->whereNull('user_id')
+                        ->orWhere('user_id', $request->user()->id)
+                        ->orderBy('name')
+                        ->get()
+                    : [],
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];

@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreTransactionRequest;
 use App\Models\Account;
+use App\Models\Category;
 use App\Models\Transaction;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,66 +26,89 @@ class TransactionController extends Controller
 
         $accounts = Account::orderBy('name', 'asc')->get();
 
+        $categories = Category::query()
+            ->whereNull('user_id')
+            ->orWhere('user_id', auth()->id())
+            ->orderBy('name')
+            ->get();
+
         return Inertia::render('transactions/Index', [
             'transactions' => $transactions,
             'accounts' => $accounts,
+            'categories' => $categories,
         ]);
     }
 
     /**
      * Store a newly created transaction in storage.
+     *
+     * Uses a DB::transaction with pessimistic row-level locking (lockForUpdate)
+     * to prevent race conditions where two concurrent requests could both pass
+     * the balance check and overdraw an account.
      */
-    public function store(Request $request): RedirectResponse
+    public function store(StoreTransactionRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'type' => 'required|in:income,expense,transfer',
-            'amount' => 'required|numeric|min:0.01',
-            'date' => 'required|date',
-            'account_id' => 'required|exists:accounts,id',
-            'to_account_id' => 'required_if:type,transfer|nullable|exists:accounts,id|different:account_id',
-            'category' => 'required_unless:type,transfer|nullable|string|max:255',
-            'description' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
+        $amount = (float) $validated['amount'];
 
-        DB::transaction(function () use ($request) {
-            $fromAccount = Account::where('id', $request->account_id)->firstOrFail();
-            $amount = (float) $request->amount;
+        DB::transaction(function () use ($validated, $amount) {
+            // Pessimistic lock: SELECT ... FOR UPDATE prevents concurrent reads
+            // from seeing stale balances until this transaction commits.
+            $sourceAccount = Account::where('id', $validated['account_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
 
-            $transaction = new Transaction();
-            $transaction->type = $request->type;
-            $transaction->amount = $amount;
-            $transaction->date = $request->date;
-            $transaction->description = $request->description;
-
-            if ($request->type === 'income') {
-                $fromAccount->balance += $amount;
-                $fromAccount->save();
-
-                $transaction->account_id = $fromAccount->id;
-                $transaction->category = $request->category;
-            } elseif ($request->type === 'expense') {
-                // If it's a credit card, check limit
-                if ($fromAccount->type === 'credit_card') {
-                    $fromAccount->validateExpense($amount);
+            // === BALANCE VERIFICATION ===
+            if ($validated['type'] === 'expense' || $validated['type'] === 'transfer') {
+                if ($sourceAccount->type === 'credit_card') {
+                    // Credit card: validate against credit limit ceiling
+                    $sourceAccount->validateExpense($amount);
+                } else {
+                    // Non-credit accounts: strict insufficient funds check
+                    if ((float) $sourceAccount->balance < $amount) {
+                        throw ValidationException::withMessages([
+                            'balance' => ['Insufficient funds in the selected account.'],
+                        ]);
+                    }
                 }
+            }
 
-                $fromAccount->balance -= $amount;
-                $fromAccount->save();
+            // === BUILD TRANSACTION RECORD ===
+            $transaction = new Transaction();
+            $transaction->type = $validated['type'];
+            $transaction->amount = $amount;
+            $transaction->date = $validated['date'];
+            $transaction->description = $validated['description'] ?? null;
 
-                $transaction->account_id = $fromAccount->id;
-                $transaction->category = $request->category;
-            } elseif ($request->type === 'transfer') {
-                $toAccount = Account::where('id', $request->to_account_id)->firstOrFail();
+            // === BALANCE ADJUSTMENT (Live Math) ===
+            if ($validated['type'] === 'income') {
+                $sourceAccount->balance += $amount;
+                $sourceAccount->save();
 
-                // Subtract from source, add to destination
-                $fromAccount->balance -= $amount;
-                $fromAccount->save();
+                $transaction->account_id = $sourceAccount->id;
+                $transaction->category = $validated['category'];
+            } elseif ($validated['type'] === 'expense') {
+                $sourceAccount->balance -= $amount;
+                $sourceAccount->save();
 
-                $toAccount->balance += $amount;
-                $toAccount->save();
+                $transaction->account_id = $sourceAccount->id;
+                $transaction->category = $validated['category'];
+            } elseif ($validated['type'] === 'transfer') {
+                // Lock destination account row as well to prevent deadlocks
+                $destinationAccount = Account::where('id', $validated['to_account_id'])
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-                $transaction->account_id = $fromAccount->id;
-                $transaction->to_account_id = $toAccount->id;
+                // Debit source
+                $sourceAccount->balance -= $amount;
+                $sourceAccount->save();
+
+                // Credit destination
+                $destinationAccount->balance += $amount;
+                $destinationAccount->save();
+
+                $transaction->account_id = $sourceAccount->id;
+                $transaction->to_account_id = $destinationAccount->id;
                 $transaction->category = null;
             }
 

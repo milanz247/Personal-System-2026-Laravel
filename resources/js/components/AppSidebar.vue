@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid, Wallet, ArrowRightLeft } from '@lucide/vue';
+import { LayoutGrid, Wallet, ArrowRightLeft, Tags } from '@lucide/vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -35,6 +35,11 @@ const mainNavItems: NavItem[] = [
         href: transactionsIndex().url,
         icon: ArrowRightLeft,
     },
+    {
+        title: 'Categories',
+        href: '/categories',
+        icon: Tags,
+    },
 ];
 
 const footerNavItems: NavItem[] = [];
@@ -55,6 +60,7 @@ const footerNavItems: NavItem[] = [];
         </SidebarHeader>
 
         <SidebarContent>
+            <!-- Core Navigation -->
             <NavMain :items="mainNavItems" />
         </SidebarContent>
 

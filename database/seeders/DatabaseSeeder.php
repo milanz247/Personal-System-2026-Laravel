@@ -18,6 +18,9 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Seed system-wide default categories first
+        $this->call(CategorySeeder::class);
+
         // 1. Create the specific Milan user
         $user = User::factory()->create([
             'email' => 'milan@gmail.com',

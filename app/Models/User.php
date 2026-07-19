@@ -77,6 +77,15 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * Get the user's categories.
+     */
+    public function categories(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
+
+
+    /**
      * Get the user's name (virtual attribute).
      */
     protected function name(): Attribute

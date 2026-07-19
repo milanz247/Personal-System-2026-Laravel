@@ -62,6 +62,13 @@ const props = defineProps<{
         credit_limit: string | null;
         currency: string;
     }>;
+    categories: Array<{
+        id: number;
+        user_id: number | null;
+        name: string;
+        type: 'expense' | 'income';
+        icon: string | null;
+    }>;
 }>();
 
 // Form & Modal States
@@ -76,6 +83,11 @@ const form = useForm({
     to_account_id: '',
     category: '',
     description: '',
+});
+
+// Dynamic categories filtered by current form type
+const availableCategories = computed(() => {
+    return props.categories.filter(c => c.type === form.type);
 });
 
 // Interactive Search and Filtering
@@ -145,20 +157,19 @@ const formatDate = (dateStr: string) => {
 const getCategoryStyle = (category: string | null) => {
     if (!category) return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300';
     
-    const categoriesMap: Record<string, string> = {
-        'Salary': 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30',
-        'Freelance': 'bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-400 border border-teal-200/50 dark:border-teal-900/30',
-        'Investments': 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/30',
-        'Food': 'bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-200/50 dark:border-orange-900/30',
-        'Transport': 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-200/50 dark:border-blue-900/30',
-        'Utilities': 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-900/30',
-        'Entertainment': 'bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-200/50 dark:border-purple-900/30',
-        'Shopping': 'bg-pink-50 text-pink-700 dark:bg-pink-500/10 dark:text-pink-400 border border-pink-200/50 dark:border-pink-900/30',
-        'Medical/Health': 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30',
-        'Bills/Debt': 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 border border-red-200/50 dark:border-red-900/30',
-    };
+    // Look up the category type from the database categories
+    const dbCategory = props.categories.find(c => c.name === category);
     
-    return categoriesMap[category] || 'bg-zinc-50 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50';
+    if (dbCategory?.type === 'income') {
+        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30';
+    }
+    
+    if (dbCategory?.type === 'expense') {
+        return 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 border border-red-200/50 dark:border-red-900/30';
+    }
+    
+    // Fallback for categories not found in DB (legacy data)
+    return 'bg-zinc-50 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50';
 };
 
 const submitTransaction = () => {
@@ -477,7 +488,7 @@ const submitTransaction = () => {
                         </div>
                     </div>
 
-                    <!-- Category (Income/Expense only) -->
+                    <!-- Category (Income/Expense only, from DB) -->
                     <div v-if="form.type !== 'transfer'" class="grid gap-2">
                         <Label for="sheet_category">Category</Label>
                         <select 
@@ -487,18 +498,9 @@ const submitTransaction = () => {
                             required
                         >
                             <option value="">Select Category</option>
-                            <option v-if="form.type === 'income'" value="Salary">Salary</option>
-                            <option v-if="form.type === 'income'" value="Freelance">Freelance</option>
-                            <option v-if="form.type === 'income'" value="Investments">Investments</option>
-                            <option v-if="form.type === 'income'" value="Gifts/Other">Gifts/Other</option>
-                            
-                            <option v-if="form.type === 'expense'" value="Food">Food</option>
-                            <option v-if="form.type === 'expense'" value="Transport">Transport</option>
-                            <option v-if="form.type === 'expense'" value="Utilities">Utilities</option>
-                            <option v-if="form.type === 'expense'" value="Entertainment">Entertainment</option>
-                            <option v-if="form.type === 'expense'" value="Shopping">Shopping</option>
-                            <option v-if="form.type === 'expense'" value="Medical/Health">Medical/Health</option>
-                            <option v-if="form.type === 'expense'" value="Bills/Debt">Bills/Debt</option>
+                            <option v-for="cat in availableCategories" :key="cat.id" :value="cat.name">
+                                {{ cat.name }}
+                            </option>
                         </select>
                         <div v-if="form.errors.category" class="text-xs text-red-500">{{ form.errors.category }}</div>
                     </div>

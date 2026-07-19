@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
+import { Head, useForm, usePage } from '@inertiajs/vue3';
 import { dashboard } from '@/routes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,13 @@ const form = useForm({
     to_account_id: '',
     category: '',
     description: '',
+});
+
+// Dynamic categories from globally shared Inertia props
+const page = usePage<any>();
+const availableCategories = computed(() => {
+    const allCategories = page.props.auth.categories || [];
+    return allCategories.filter((c: any) => c.type === form.type);
 });
 
 const submitTransaction = () => {
@@ -324,7 +331,7 @@ const submitTransaction = () => {
                         </div>
                     </div>
 
-                    <!-- Category (Hidden on Transfer) -->
+                    <!-- Category (Hidden on Transfer, from DB) -->
                     <div v-if="form.type !== 'transfer'" class="grid gap-2">
                         <Label for="category">Category</Label>
                         <select 
@@ -334,18 +341,9 @@ const submitTransaction = () => {
                             required
                         >
                             <option value="">Select Category</option>
-                            <option v-if="form.type === 'income'" value="Salary">Salary</option>
-                            <option v-if="form.type === 'income'" value="Freelance">Freelance</option>
-                            <option v-if="form.type === 'income'" value="Investments">Investments</option>
-                            <option v-if="form.type === 'income'" value="Gifts/Other">Gifts/Other</option>
-                            
-                            <option v-if="form.type === 'expense'" value="Food">Food</option>
-                            <option v-if="form.type === 'expense'" value="Transport">Transport</option>
-                            <option v-if="form.type === 'expense'" value="Utilities">Utilities</option>
-                            <option v-if="form.type === 'expense'" value="Entertainment">Entertainment</option>
-                            <option v-if="form.type === 'expense'" value="Shopping">Shopping</option>
-                            <option v-if="form.type === 'expense'" value="Medical/Health">Medical/Health</option>
-                            <option v-if="form.type === 'expense'" value="Bills/Debt">Bills/Debt</option>
+                            <option v-for="cat in availableCategories" :key="cat.id" :value="cat.name">
+                                {{ cat.name }}
+                            </option>
                         </select>
                         <div v-if="form.errors.category" class="text-xs text-red-500">{{ form.errors.category }}</div>
                     </div>
